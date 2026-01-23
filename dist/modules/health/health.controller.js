@@ -20,25 +20,16 @@ let HealthController = class HealthController {
     health() {
         return this.healthService.check();
     }
-    root() {
-        return { message: 'FacilPay API running' };
-    }
 };
 exports.HealthController = HealthController;
-__decorate([
-    (0, common_1.Get)('health'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], HealthController.prototype, "health", null);
 __decorate([
     (0, common_1.Get)(),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
-], HealthController.prototype, "root", null);
+], HealthController.prototype, "health", null);
 exports.HealthController = HealthController = __decorate([
-    (0, common_1.Controller)(),
+    (0, common_1.Controller)('health'),
     __metadata("design:paramtypes", [health_service_1.HealthService])
 ], HealthController);
 //# sourceMappingURL=health.controller.js.map
