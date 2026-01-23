@@ -55,15 +55,51 @@ Body:
 }
 ```
 
+## 🔐 Authentication
+
+The API includes a JWT-based authentication system with the following endpoints:
+
+### Register a new user
+```bash
+curl -X POST http://localhost:3000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password123"}'
+```
+
+### Login user
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"password123"}'
+```
+
+### Access protected route
+```bash
+curl -X GET http://localhost:3000/profile \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
 
 ## 📁 Project Structure
 
 src/
 ├── modules/
+│   ├── auth/
+│   │   ├── auth.controller.ts
+│   │   ├── auth.service.ts
+│   │   ├── auth.module.ts
+│   │   ├── jwt.strategy.ts
+│   │   ├── guards/
+│   │   └── decorators/
+│   ├── users/
+│   │   ├── user.entity.ts
+│   │   ├── dto/
+│   │   └── users.module.ts
 │   └── health/
 │       ├── health.controller.ts
 │       ├── health.service.ts
 │       └── health.module.ts
+├── app.controller.ts
+├── app.service.ts
 ├── app.module.ts
 └── main.ts
 
@@ -73,3 +109,12 @@ src/
 The server runs on port 3000 by default.
 
 The port can be configured using the PORT variable in the .env file
+
+## 🔒 Security Features
+
+- JWT token-based authentication
+- Password hashing with bcrypt
+- Protected routes with guards
+- Public route decorator
+- Current user decorator
+- Role-based access control (ready for implementation)
