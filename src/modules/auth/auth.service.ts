@@ -4,40 +4,32 @@ import * as bcrypt from 'bcrypt';
 import { User } from '../users/user.entity';
 import { RegisterDto } from '../users/dto/register.dto';
 import { LoginDto } from '../users/dto/login.dto';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class AuthService {
-  private users: User[] = [];
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private usersService: UsersService,
+    private jwtService: JwtService
+  ) { }
 
   async register(registerDto: RegisterDto): Promise<{ message: string; user: Omit<User, 'password'> }> {
-    const existingUser = this.users.find(user => user.email === registerDto.email);
+    const existingUser = await this.usersService.findByEmail(registerDto.email);
     if (existingUser) {
       throw new UnauthorizedException('User already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(registerDto.password, 10);
-    
-    const user: User = {
-      id: Math.random().toString(36).substring(7),
-      email: registerDto.email,
-      password: hashedPassword,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    const user = await this.usersService.create(registerDto);
 
-    this.users.push(user);
-
-    const { password, ...userWithoutPassword } = user;
     return {
       message: 'User registered successfully',
-      user: userWithoutPassword,
+      user: user,
     };
   }
 
   async login(loginDto: LoginDto): Promise<{ access_token: string; user: Omit<User, 'password'> }> {
-    const user = this.users.find(u => u.email === loginDto.email);
+    const user = await this.usersService.findByEmail(loginDto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -58,12 +50,10 @@ export class AuthService {
   }
 
   async validateUser(userId: string): Promise<Omit<User, 'password'> | null> {
-    const user = this.users.find(u => u.id === userId);
+    const user = await this.usersService.findOne(userId).catch(() => null);
     if (!user) {
       return null;
     }
-
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    return user;
   }
 }
