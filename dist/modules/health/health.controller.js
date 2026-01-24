@@ -17,7 +17,7 @@ let HealthController = class HealthController {
     constructor(healthService) {
         this.healthService = healthService;
     }
-    health() {
+    async health() {
         return this.healthService.check();
     }
 };
@@ -26,7 +26,7 @@ __decorate([
     (0, common_1.Get)(),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], HealthController.prototype, "health", null);
 exports.HealthController = HealthController = __decorate([
     (0, common_1.Controller)('health'),
