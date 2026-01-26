@@ -5,14 +5,20 @@ import { User } from '../users/user.entity';
 import { RegisterDto } from '../users/dto/register.dto';
 import { LoginDto } from '../users/dto/login.dto';
 import { UsersService } from '../users/users.service';
+import { AppLogger } from '../logger/logger.service';
+import { Logger } from 'pino';
 
 @Injectable()
 export class AuthService {
+  private readonly logger: Logger;
 
   constructor(
     private usersService: UsersService,
-    private jwtService: JwtService
-  ) { }
+    private jwtService: JwtService,
+    appLogger: AppLogger,
+  ) {
+    this.logger = appLogger.child({ module: AuthService.name });
+  }
 
   async register(registerDto: RegisterDto): Promise<{ message: string; user: Omit<User, 'password'> }> {
     const existingUser = await this.usersService.findByEmail(registerDto.email);
@@ -21,6 +27,7 @@ export class AuthService {
     }
 
     const user = await this.usersService.create(registerDto);
+    this.logger.info({ userId: user.id, email: user.email }, 'User registered');
 
     return {
       message: 'User registered successfully',
@@ -43,6 +50,7 @@ export class AuthService {
     const access_token = this.jwtService.sign(payload);
 
     const { password, ...userWithoutPassword } = user;
+    this.logger.info({ userId: user.id, email: user.email }, 'User login successful');
     return {
       access_token,
       user: userWithoutPassword,

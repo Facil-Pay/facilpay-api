@@ -3,10 +3,17 @@ import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import * as bcrypt from 'bcrypt';
+import { AppLogger } from '../logger/logger.service';
+import { Logger } from 'pino';
 
 @Injectable()
 export class UsersService {
     private users: User[] = [];
+    private readonly logger: Logger;
+
+    constructor(appLogger: AppLogger) {
+        this.logger = appLogger.child({ module: UsersService.name });
+    }
 
     async create(createUserDto: CreateUserDto): Promise<Omit<User, 'password'>> {
         const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
@@ -21,6 +28,7 @@ export class UsersService {
 
         this.users.push(user);
         const { password, ...result } = user;
+        this.logger.info({ userId: result.id, email: result.email }, 'User created');
         return result;
     }
 
@@ -64,6 +72,13 @@ export class UsersService {
         this.users[userIndex] = updatedUser;
 
         const { password, ...result } = updatedUser;
+        const updatedFields = Object.keys(updateUserDto).filter(key => key !== 'password');
+        if (updatedFields.length > 0) {
+            this.logger.info(
+                { userId: result.id, updatedFields },
+                'User updated',
+            );
+        }
         return result;
     }
 
@@ -73,5 +88,6 @@ export class UsersService {
             throw new NotFoundException(`User with ID ${id} not found`);
         }
         this.users.splice(userIndex, 1);
+        this.logger.info({ userId: id }, 'User removed');
     }
 }
