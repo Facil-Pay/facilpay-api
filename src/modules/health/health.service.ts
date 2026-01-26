@@ -1,9 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { AppLogger } from '../logger/logger.service';
+import { Logger } from 'pino';
 
 @Injectable()
 export class HealthService {
-  constructor(private readonly dataSource: DataSource) { }
+  private readonly logger: Logger;
+
+  constructor(
+    private readonly dataSource: DataSource,
+    appLogger: AppLogger,
+  ) {
+    this.logger = appLogger.child({ module: HealthService.name });
+  }
 
   async check() {
     const dbStatus = await this.checkDatabase();
@@ -23,8 +32,13 @@ export class HealthService {
         await this.dataSource.query('SELECT 1');
         return { connected: true, message: 'Database connection is healthy' };
       }
+      this.logger.warn('Database not initialized');
       return { connected: false, message: 'Database not initialized' };
     } catch (error) {
+      this.logger.error(
+        { err: error instanceof Error ? error : new Error('Database check failed') },
+        'Database health check failed',
+      );
       return {
         connected: false,
         message: error instanceof Error ? error.message : 'Unknown database error',

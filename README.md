@@ -110,6 +110,21 @@ The server runs on port 3000 by default.
 
 The port can be configured using the PORT variable in the .env file
 
+## 📊 Logging
+
+Logging is structured with Pino and writes rotating files under the log directory.
+
+Environment variables:
+
+- LOG_LEVEL (default: info in production, debug in development)
+- LOG_DIR (default: logs)
+- LOG_PRETTY (default: true in development, false in production)
+- LOG_MAX_SIZE (default: 10m)
+- LOG_RETENTION_DAYS (default: 14)
+- LOG_BODY (default: false)
+- LOG_BODY_MAX_LENGTH (default: 2048)
+- LOG_RESPONSE_BODY (default: false)
+
 ## 🔒 Security Features
 
 - JWT token-based authentication
