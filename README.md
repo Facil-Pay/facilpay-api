@@ -133,3 +133,5 @@ Environment variables:
 - Public route decorator
 - Current user decorator
 - Role-based access control (ready for implementation)
+
+- Telegram: https://t.me/+afM9uh7GGtVkYmZk
