@@ -14,10 +14,7 @@ import { extractUserId } from './logging.utils';
 export class LoggingExceptionFilter extends BaseExceptionFilter {
   private readonly logger: Logger;
 
-  constructor(
-    appLogger: AppLogger,
-    httpAdapterHost: HttpAdapterHost,
-  ) {
+  constructor(appLogger: AppLogger, httpAdapterHost: HttpAdapterHost) {
     super(httpAdapterHost.httpAdapter);
     this.logger = appLogger.child({ module: LoggingExceptionFilter.name });
   }
@@ -41,9 +38,8 @@ export class LoggingExceptionFilter extends BaseExceptionFilter {
     response: Response,
     statusCode: number,
   ) {
-    const err = exception instanceof Error
-      ? exception
-      : new Error('Unhandled exception');
+    const err =
+      exception instanceof Error ? exception : new Error('Unhandled exception');
     const path = request.originalUrl ?? request.url;
 
     if (response.locals) {

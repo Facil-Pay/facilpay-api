@@ -1,4 +1,8 @@
-import { Injectable, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import {
+  Injectable,
+  OnApplicationBootstrap,
+  OnApplicationShutdown,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { Logger } from 'pino';
 import { AppLogger } from '../logger/logger.service';

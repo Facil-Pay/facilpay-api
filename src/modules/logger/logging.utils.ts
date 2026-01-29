@@ -91,7 +91,9 @@ export function extractUserId(user: unknown): string | undefined {
   return undefined;
 }
 
-export function normalizeErrorContext(error: unknown): Record<string, unknown> | undefined {
+export function normalizeErrorContext(
+  error: unknown,
+): Record<string, unknown> | undefined {
   if (!error) {
     return undefined;
   }
@@ -106,7 +108,8 @@ export function normalizeErrorContext(error: unknown): Record<string, unknown> |
 
   if (typeof error === 'object') {
     const record = error as Record<string, unknown>;
-    const message = typeof record.message === 'string' ? record.message : undefined;
+    const message =
+      typeof record.message === 'string' ? record.message : undefined;
     const name = typeof record.name === 'string' ? record.name : undefined;
 
     if (message || name) {
@@ -119,7 +122,7 @@ export function normalizeErrorContext(error: unknown): Record<string, unknown> |
 
 function redactSensitive(payload: unknown): unknown {
   if (Array.isArray(payload)) {
-    return payload.map(item => redactSensitive(item));
+    return payload.map((item) => redactSensitive(item));
   }
 
   if (!isPlainObject(payload)) {

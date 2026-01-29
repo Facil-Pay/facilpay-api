@@ -16,7 +16,8 @@ import { DatabaseLoggerService } from './database-logger.service';
         password: configService.get<string>('DATABASE_PASSWORD', 'password'),
         database: configService.get<string>('DATABASE_NAME', 'facilpay'),
         entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
-        synchronize: configService.get<string>('DATABASE_SYNCHRONIZE', 'false') === 'true',
+        synchronize:
+          configService.get<string>('DATABASE_SYNCHRONIZE', 'false') === 'true',
         logging: configService.get<string>('NODE_ENV') === 'development',
       }),
     }),

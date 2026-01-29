@@ -1,39 +1,45 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 export enum PaymentStatus {
-    PENDING = 'PENDING',
-    COMPLETED = 'COMPLETED',
-    FAILED = 'FAILED',
-    REFUNDED = 'REFUNDED',
+  PENDING = 'PENDING',
+  COMPLETED = 'COMPLETED',
+  FAILED = 'FAILED',
+  REFUNDED = 'REFUNDED',
 }
 
 @Entity('payments')
 export class Payment {
-    @PrimaryGeneratedColumn('uuid')
-    id: string;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-    @Column({ type: 'decimal', precision: 10, scale: 2 })
-    amount: number;
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
+  amount: number;
 
-    @Column()
-    currency: string;
+  @Column()
+  currency: string;
 
-    @Column({
-        type: 'enum',
-        enum: PaymentStatus,
-        default: PaymentStatus.PENDING,
-    })
-    status: PaymentStatus;
+  @Column({
+    type: 'enum',
+    enum: PaymentStatus,
+    default: PaymentStatus.PENDING,
+  })
+  status: PaymentStatus;
 
-    @Column({ nullable: true })
-    externalReference: string;
+  @Column({ nullable: true })
+  externalReference: string;
 
-    @Column({ nullable: true })
-    description: string;
+  @Column({ nullable: true })
+  description: string;
 
-    @CreateDateColumn()
-    createdAt: Date;
+  @CreateDateColumn()
+  createdAt: Date;
 
-    @UpdateDateColumn()
-    updatedAt: Date;
+  @UpdateDateColumn()
+  updatedAt: Date;
 }

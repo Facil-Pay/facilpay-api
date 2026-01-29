@@ -20,7 +20,9 @@ export class AuthService {
     this.logger = appLogger.child({ module: AuthService.name });
   }
 
-  async register(registerDto: RegisterDto): Promise<{ message: string; user: Omit<User, 'password'> }> {
+  async register(
+    registerDto: RegisterDto,
+  ): Promise<{ message: string; user: Omit<User, 'password'> }> {
     const existingUser = await this.usersService.findByEmail(registerDto.email);
     if (existingUser) {
       throw new UnauthorizedException('User already exists');
@@ -35,13 +37,18 @@ export class AuthService {
     };
   }
 
-  async login(loginDto: LoginDto): Promise<{ access_token: string; user: Omit<User, 'password'> }> {
+  async login(
+    loginDto: LoginDto,
+  ): Promise<{ access_token: string; user: Omit<User, 'password'> }> {
     const user = await this.usersService.findByEmail(loginDto.email);
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const isPasswordValid = await bcrypt.compare(loginDto.password, user.password);
+    const isPasswordValid = await bcrypt.compare(
+      loginDto.password,
+      user.password,
+    );
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -50,7 +57,10 @@ export class AuthService {
     const access_token = this.jwtService.sign(payload);
 
     const { password, ...userWithoutPassword } = user;
-    this.logger.info({ userId: user.id, email: user.email }, 'User login successful');
+    this.logger.info(
+      { userId: user.id, email: user.email },
+      'User login successful',
+    );
     return {
       access_token,
       user: userWithoutPassword,

@@ -29,7 +29,7 @@ describe('LoggingExceptionFilter', () => {
       expect.objectContaining({ err: error }),
       'Unhandled exception',
     );
-    const meta = (mockPinoLogger.error as jest.Mock).mock.calls[0][0] as Record<
+    const meta = mockPinoLogger.error.mock.calls[0][0] as Record<
       string,
       unknown
     >;

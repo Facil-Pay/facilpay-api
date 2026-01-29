@@ -21,10 +21,7 @@ export class HttpLoggerMiddleware implements NestMiddleware {
   private readonly logResponseBody: boolean;
   private readonly bodyMaxLength: number;
 
-  constructor(
-    appLogger: AppLogger,
-    configService: ConfigService,
-  ) {
+  constructor(appLogger: AppLogger, configService: ConfigService) {
     this.logger = appLogger.child({ module: HttpLoggerMiddleware.name });
     this.logBody = parseBoolean(configService.get<string>('LOG_BODY'), false);
     this.logResponseBody = parseBoolean(
@@ -99,7 +96,10 @@ export class HttpLoggerMiddleware implements NestMiddleware {
       }
 
       if (this.logResponseBody) {
-        const sanitizedResponseBody = sanitizeBody(responseBody, this.bodyMaxLength);
+        const sanitizedResponseBody = sanitizeBody(
+          responseBody,
+          this.bodyMaxLength,
+        );
         if (sanitizedResponseBody !== undefined) {
           responseMeta.body = sanitizedResponseBody;
         }
@@ -144,7 +144,10 @@ function getContentLength(res: Response): number | undefined {
   return undefined;
 }
 
-function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+function parseBoolean(
+  value: string | undefined,
+  defaultValue: boolean,
+): boolean {
   if (value === undefined) {
     return defaultValue;
   }

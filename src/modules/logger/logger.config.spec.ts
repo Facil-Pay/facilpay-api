@@ -24,12 +24,12 @@ describe('logger config', () => {
     const targets = buildTransportTargets(config);
 
     const combinedTarget = targets.find(
-      target =>
+      (target) =>
         target.target === 'pino-roll' &&
         String(target.options?.file).includes('combined'),
     );
     const errorTarget = targets.find(
-      target =>
+      (target) =>
         target.target === 'pino-roll' &&
         String(target.options?.file).includes('error'),
     );
@@ -37,8 +37,6 @@ describe('logger config', () => {
     expect(combinedTarget?.options?.file).toBe(
       join(config.logDir, 'combined.log'),
     );
-    expect(errorTarget?.options?.file).toBe(
-      join(config.logDir, 'error.log'),
-    );
+    expect(errorTarget?.options?.file).toBe(join(config.logDir, 'error.log'));
   });
 });
