@@ -5,9 +5,9 @@ import { PaymentsController } from './payments.controller';
 import { Payment } from './payment.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Payment])],
-    controllers: [PaymentsController],
-    providers: [PaymentsService],
-    exports: [PaymentsService],
+  imports: [TypeOrmModule.forFeature([Payment])],
+  controllers: [PaymentsController],
+  providers: [PaymentsService],
+  exports: [PaymentsService],
 })
-export class PaymentsModule { }
+export class PaymentsModule {}

@@ -26,10 +26,14 @@ export function buildLoggerConfig(configService: ConfigService): LoggerConfig {
   const level = configService.get<string>('LOG_LEVEL', levelDefault);
 
   const prettyDefault = environment !== 'production';
-  const pretty = parseBoolean(configService.get<string>('LOG_PRETTY'), prettyDefault);
+  const pretty = parseBoolean(
+    configService.get<string>('LOG_PRETTY'),
+    prettyDefault,
+  );
 
   const logDir = resolve(configService.get<string>('LOG_DIR', 'logs'));
-  const maxSize = configService.get<string>('LOG_MAX_SIZE', DEFAULT_MAX_SIZE) || undefined;
+  const maxSize =
+    configService.get<string>('LOG_MAX_SIZE', DEFAULT_MAX_SIZE) || undefined;
   const retentionDays = parseNumber(
     configService.get<string>('LOG_RETENTION_DAYS'),
     DEFAULT_RETENTION_DAYS,
@@ -96,7 +100,10 @@ export function buildTransportTargets(config: LoggerConfig): TransportTarget[] {
   return targets;
 }
 
-function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+function parseBoolean(
+  value: string | undefined,
+  defaultValue: boolean,
+): boolean {
   if (value === undefined) {
     return defaultValue;
   }

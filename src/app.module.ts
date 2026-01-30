@@ -28,4 +28,3 @@ export class AppModule implements NestModule {
     consumer.apply(HttpLoggerMiddleware).forRoutes('*');
   }
 }
-

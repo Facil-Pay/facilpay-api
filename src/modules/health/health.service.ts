@@ -26,7 +26,10 @@ export class HealthService {
     };
   }
 
-  private async checkDatabase(): Promise<{ connected: boolean; message: string }> {
+  private async checkDatabase(): Promise<{
+    connected: boolean;
+    message: string;
+  }> {
     try {
       if (this.dataSource.isInitialized) {
         await this.dataSource.query('SELECT 1');
@@ -36,12 +39,16 @@ export class HealthService {
       return { connected: false, message: 'Database not initialized' };
     } catch (error) {
       this.logger.error(
-        { err: error instanceof Error ? error : new Error('Database check failed') },
+        {
+          err:
+            error instanceof Error ? error : new Error('Database check failed'),
+        },
         'Database health check failed',
       );
       return {
         connected: false,
-        message: error instanceof Error ? error.message : 'Unknown database error',
+        message:
+          error instanceof Error ? error.message : 'Unknown database error',
       };
     }
   }

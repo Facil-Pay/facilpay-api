@@ -5,6 +5,7 @@ import { AppLogger } from './logger.service';
 import { HttpLoggerMiddleware } from './http-logger.middleware';
 import { LoggingExceptionFilter } from './logging-exception.filter';
 import { LifecycleLoggerService } from './lifecycle-logger.service';
+import { ValidationExceptionFilter } from '../../common/filters/validation-exception.filter';
 
 @Global()
 @Module({
@@ -13,6 +14,10 @@ import { LifecycleLoggerService } from './lifecycle-logger.service';
     AppLogger,
     HttpLoggerMiddleware,
     LifecycleLoggerService,
+    {
+      provide: APP_FILTER,
+      useClass: ValidationExceptionFilter,
+    },
     {
       provide: APP_FILTER,
       useClass: LoggingExceptionFilter,
