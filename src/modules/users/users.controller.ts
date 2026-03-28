@@ -13,10 +13,14 @@ import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../../common/constants/roles';
 import {
   ApiBearerAuth,
   ApiBody,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
@@ -60,12 +64,14 @@ export class UsersController {
     return this.usersService.create(createUserDto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Get()
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'List users',
-    description: 'Returns all users (passwords are never returned).',
+    description:
+      'Returns all users (passwords are never returned). Admin only.',
   })
   @ApiOkResponse({
     description: 'List of users.',
@@ -74,6 +80,7 @@ export class UsersController {
         {
           id: 'abc123',
           email: 'jane.doe@example.com',
+          roles: ['USER'],
           createdAt: '2026-01-26T10:00:00.000Z',
           updatedAt: '2026-01-26T10:00:00.000Z',
         },
@@ -86,6 +93,15 @@ export class UsersController {
       example: {
         statusCode: 401,
         message: 'Unauthorized',
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'User does not have ADMIN role.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Forbidden',
       },
     },
   })
@@ -161,12 +177,13 @@ export class UsersController {
     return this.usersService.update(id, updateUserDto);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
   @Delete(':id')
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Delete a user',
-    description: 'Deletes a user by id.',
+    description: 'Deletes a user by id. Admin only.',
   })
   @ApiParam({
     name: 'id',
@@ -175,6 +192,15 @@ export class UsersController {
   })
   @ApiNoContentResponse({
     description: 'User deleted successfully.',
+  })
+  @ApiForbiddenResponse({
+    description: 'User does not have ADMIN role.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Forbidden',
+      },
+    },
   })
   remove(@Param('id') id: string) {
     return this.usersService.remove(id);
