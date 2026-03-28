@@ -17,7 +17,7 @@ describe('PaymentsService - Transactions', () => {
     amount: 100.0,
     currency: 'USD',
     status: PaymentStatus.PENDING,
-    externalReference: null,
+    externalReference: '',
     description: 'Test payment',
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -216,7 +216,7 @@ describe('PaymentsService - Transactions', () => {
         externalReference: 'ext_ref_456',
       };
 
-      const paymentWithoutRef = { ...mockPayment, externalReference: null };
+      const paymentWithoutRef = { ...mockPayment, externalReference: '' };
       const updatedPayment = {
         ...paymentWithoutRef,
         status: PaymentStatus.COMPLETED,
