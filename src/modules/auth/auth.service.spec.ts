@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { UnauthorizedException } from '@nestjs/common';
+import { AppLogger } from '../logger/logger.service';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -22,6 +23,15 @@ describe('AuthService', () => {
     sign: jest.fn(),
   };
 
+  const mockAppLogger = {
+    child: jest.fn(() => ({
+      info: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+    })),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -33,6 +43,10 @@ describe('AuthService', () => {
         {
           provide: JwtService,
           useValue: mockJwtService,
+        },
+        {
+          provide: AppLogger,
+          useValue: mockAppLogger,
         },
       ],
     }).compile();

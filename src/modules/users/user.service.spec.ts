@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service';
+import { AppLogger } from '../logger/logger.service';
 import { NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 
@@ -8,9 +9,24 @@ jest.mock('bcrypt');
 describe('UsersService', () => {
   let service: UsersService;
 
+  const mockAppLogger = {
+    child: jest.fn(() => ({
+      info: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn(),
+      warn: jest.fn(),
+    })),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [UsersService],
+      providers: [
+        UsersService,
+        {
+          provide: AppLogger,
+          useValue: mockAppLogger,
+        },
+      ],
     }).compile();
 
     service = module.get<UsersService>(UsersService);

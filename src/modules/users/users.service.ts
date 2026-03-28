@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UserRole } from '../../common/constants/roles';
 import * as bcrypt from 'bcrypt';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
@@ -22,6 +23,7 @@ export class UsersService {
       id: Math.random().toString(36).substring(7),
       email: createUserDto.email,
       password: hashedPassword,
+      roles: [UserRole.USER],
       createdAt: new Date(),
       updatedAt: new Date(),
     };
