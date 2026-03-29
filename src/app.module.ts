@@ -10,12 +10,14 @@ import { AppService } from './app.service';
 import { LoggerModule } from './modules/logger/logger.module';
 import { HttpLoggerMiddleware } from './modules/logger/http-logger.middleware';
 import { ThrottlerConfigModule } from './modules/throttler/throttler.config.module';
+import { CorsModule } from './modules/cors/cors.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerConfigModule,
     LoggerModule,
+    CorsModule,
     DatabaseModule,
     HealthModule,
     UsersModule,
