@@ -10,6 +10,7 @@ import { AppService } from './app.service';
 import { LoggerModule } from './modules/logger/logger.module';
 import { HttpLoggerMiddleware } from './modules/logger/http-logger.middleware';
 import { ThrottlerConfigModule } from './modules/throttler/throttler.config.module';
+import { StellarModule } from './modules/stellar/stellar.module';
 import { CorsModule } from './modules/cors/cors.module';
 
 @Module({
@@ -23,6 +24,7 @@ import { CorsModule } from './modules/cors/cors.module';
     UsersModule,
     AuthModule,
     PaymentsModule,
+    StellarModule,
   ],
   controllers: [AppController],
   providers: [AppService],

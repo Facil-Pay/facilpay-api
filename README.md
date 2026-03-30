@@ -135,3 +135,13 @@ Environment variables:
 - Role-based access control (ready for implementation)
 
 - Telegram: https://t.me/+afM9uh7GGtVkYmZk
+
+# Stellar Configuration structure
+
+├── modules/
+│   ├── auth/
+│   ├── stellar/          <-- New Module
+│   │   ├── stellar.service.ts
+│   │   └── stellar.module.ts
+│   ├── users/
+│   └── health/
