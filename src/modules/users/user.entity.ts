@@ -5,6 +5,7 @@ export class User {
   email: string;
   password: string;
   roles: UserRole[] = [UserRole.USER];
+  isEmailVerified: boolean = false;
   createdAt: Date;
   updatedAt: Date;
 
@@ -12,6 +13,9 @@ export class User {
     Object.assign(this, partial);
     if (!this.roles) {
       this.roles = [UserRole.USER];
+    }
+    if (this.isEmailVerified === undefined) {
+      this.isEmailVerified = false;
     }
   }
 }

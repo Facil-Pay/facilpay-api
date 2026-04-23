@@ -24,6 +24,7 @@ export class UsersService {
       email: createUserDto.email,
       password: hashedPassword,
       roles: [UserRole.USER],
+      isEmailVerified: false,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -96,5 +97,15 @@ export class UsersService {
     }
     this.users.splice(userIndex, 1);
     this.logger.info({ userId: id }, 'User removed');
+  }
+
+  async verifyEmail(id: string): Promise<void> {
+    const userIndex = this.users.findIndex((user) => user.id === id);
+    if (userIndex === -1) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    this.users[userIndex].isEmailVerified = true;
+    this.users[userIndex].updatedAt = new Date();
+    this.logger.info({ userId: id }, 'User email verified');
   }
 }

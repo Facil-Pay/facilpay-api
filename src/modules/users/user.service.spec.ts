@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service';
 import { AppLogger } from '../logger/logger.service';
 import { NotFoundException } from '@nestjs/common';
+import { UserRole } from '../../common/constants/roles';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -80,6 +81,8 @@ describe('UsersService', () => {
           id: '1',
           email: 'user1@example.com',
           password: 'hash1',
+          roles: [UserRole.USER],
+          isEmailVerified: false,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -87,6 +90,8 @@ describe('UsersService', () => {
           id: '2',
           email: 'user2@example.com',
           password: 'hash2',
+          roles: [UserRole.USER],
+          isEmailVerified: false,
           createdAt: new Date(),
           updatedAt: new Date(),
         },
@@ -114,6 +119,8 @@ describe('UsersService', () => {
         id: '123',
         email: 'test@example.com',
         password: 'hashed',
+        roles: [UserRole.USER],
+        isEmailVerified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -143,6 +150,8 @@ describe('UsersService', () => {
         id: '123',
         email: 'test@example.com',
         password: 'hashed',
+        roles: [UserRole.USER],
+        isEmailVerified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -168,6 +177,8 @@ describe('UsersService', () => {
         id: '123',
         email: 'old@example.com',
         password: 'oldhash',
+        roles: [UserRole.USER],
+        isEmailVerified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -190,6 +201,8 @@ describe('UsersService', () => {
         id: '123',
         email: 'test@example.com',
         password: 'oldhash',
+        roles: [UserRole.USER],
+        isEmailVerified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -215,6 +228,8 @@ describe('UsersService', () => {
         id: '123',
         email: 'test@example.com',
         password: 'hash',
+        roles: [UserRole.USER],
+        isEmailVerified: false,
         createdAt: oldDate,
         updatedAt: oldDate,
       };
@@ -242,6 +257,8 @@ describe('UsersService', () => {
         id: '123',
         email: 'test@example.com',
         password: 'hash',
+        roles: [UserRole.USER],
+        isEmailVerified: false,
         createdAt: new Date(),
         updatedAt: new Date(),
       };
