@@ -16,7 +16,7 @@ describe('AppService', () => {
     expect(service).toBeDefined();
   });
 
-  it('should return "Hello World!"', () => {
-    expect(service.getHello()).toBe('Hello World!');
+  it('should return "FacilPay API running"', () => {
+    expect(service.getHello()).toBe('FacilPay API running');
   });
 });
