@@ -10,6 +10,9 @@ import {
   Request,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../common/interfaces';
+import { Query } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -71,20 +74,25 @@ export class UsersController {
   @ApiOperation({
     summary: 'List users',
     description:
-      'Returns all users (passwords are never returned). Admin only.',
+      'Returns paginated users (passwords are never returned). Admin only.',
   })
   @ApiOkResponse({
-    description: 'List of users.',
+    description: 'Paginated list of users.',
     schema: {
-      example: [
-        {
-          id: 'abc123',
-          email: 'jane.doe@example.com',
-          roles: ['USER'],
-          createdAt: '2026-01-26T10:00:00.000Z',
-          updatedAt: '2026-01-26T10:00:00.000Z',
-        },
-      ],
+      example: {
+        data: [
+          {
+            id: 'abc123',
+            email: 'jane.doe@example.com',
+            roles: ['USER'],
+            createdAt: '2026-01-26T10:00:00.000Z',
+            updatedAt: '2026-01-26T10:00:00.000Z',
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+      },
     },
   })
   @ApiUnauthorizedResponse({
@@ -105,8 +113,9 @@ export class UsersController {
       },
     },
   })
-  findAll() {
-    return this.usersService.findAll();
+  @ApiOperation({ summary: 'List users with pagination and filtering' })
+  findAll(@Query() query: PaginationDto): Promise<PaginatedResult<any>> {
+    return this.usersService.findAll(query);
   }
 
   @UseGuards(JwtAuthGuard)

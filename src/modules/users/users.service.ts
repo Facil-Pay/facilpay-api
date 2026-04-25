@@ -38,11 +38,36 @@ export class UsersService {
     return result;
   }
 
-  async findAll(): Promise<Omit<User, 'password'>[]> {
-    return this.users.map((user) => {
-      const { password, ...result } = user;
-      return result;
-    });
+  async findAll(params?: {
+    page?: number;
+    limit?: number;
+    sortBy?: string;
+    search?: string;
+  }): Promise<import('../../common/interfaces').PaginatedResult<Omit<User, 'password'>>> {
+    let filtered = this.users;
+    // Filtering by email (partial match)
+    if (params?.search) {
+      const searchLower = params.search.toLowerCase();
+      filtered = filtered.filter((u) => u.email.toLowerCase().includes(searchLower));
+    }
+    // Sorting
+    if (params?.sortBy && ['email', 'createdAt', 'updatedAt'].includes(params.sortBy)) {
+      const sortKey = params.sortBy as 'email' | 'createdAt' | 'updatedAt';
+      filtered = filtered.slice().sort((a, b) => {
+        if (sortKey === 'email') {
+          return a.email.localeCompare(b.email);
+        }
+        return new Date(a[sortKey]).getTime() - new Date(b[sortKey]).getTime();
+      });
+    }
+    // Pagination
+    const page = Math.max(1, params?.page ?? 1);
+    const limit = Math.min(Math.max(1, params?.limit ?? 20), 100);
+    const total = filtered.length;
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const data = filtered.slice(start, end).map(({ password, ...rest }) => rest);
+    return { data, total, page, limit };
   }
 
   async findOne(id: string): Promise<Omit<User, 'password'>> {

@@ -75,7 +75,7 @@ describe('UsersService', () => {
   });
 
   describe('findAll', () => {
-    it('should return all users without passwords', async () => {
+    it('should return all users without passwords in paginated envelope', async () => {
       service['users'] = [
         {
           id: '1',
@@ -99,17 +99,25 @@ describe('UsersService', () => {
 
       const result = await service.findAll();
 
-      expect(result).toHaveLength(2);
-      expect(result[0]).not.toHaveProperty('password');
-      expect(result[1]).not.toHaveProperty('password');
-      expect(result[0]).toHaveProperty('email', 'user1@example.com');
-      expect(result[1]).toHaveProperty('email', 'user2@example.com');
+      expect(result).toHaveProperty('data');
+      expect(result.data).toHaveLength(2);
+      expect(result.data[0]).not.toHaveProperty('password');
+      expect(result.data[1]).not.toHaveProperty('password');
+      expect(result.data[0]).toHaveProperty('email', 'user1@example.com');
+      expect(result.data[1]).toHaveProperty('email', 'user2@example.com');
+      expect(result).toHaveProperty('total', 2);
+      expect(result).toHaveProperty('page', 1);
+      expect(result).toHaveProperty('limit', 20);
     });
 
-    it('should return empty array when no users exist', async () => {
+    it('should return empty data array in paginated envelope when no users exist', async () => {
       const result = await service.findAll();
 
-      expect(result).toEqual([]);
+      expect(result).toHaveProperty('data');
+      expect(result.data).toEqual([]);
+      expect(result).toHaveProperty('total', 0);
+      expect(result).toHaveProperty('page', 1);
+      expect(result).toHaveProperty('limit', 20);
     });
   });
 

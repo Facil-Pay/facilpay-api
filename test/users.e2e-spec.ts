@@ -49,14 +49,28 @@ describe('UsersModule (e2e)', () => {
     jwtToken = response.body.access_token;
   });
 
-  it('/users (GET) - Get all users (Protected)', async () => {
+  it('/users (GET) - Get all users paginated (Protected)', async () => {
     const response = await request(app.getHttpServer())
-      .get('/users')
+      .get('/users?page=1&limit=2')
       .set('Authorization', `Bearer ${jwtToken}`)
       .expect(200);
 
-    expect(Array.isArray(response.body)).toBe(true);
-    expect(response.body.length).toBeGreaterThan(0);
+    expect(response.body).toHaveProperty('data');
+    expect(response.body).toHaveProperty('total');
+    expect(response.body).toHaveProperty('page');
+    expect(response.body).toHaveProperty('limit');
+    expect(Array.isArray(response.body.data)).toBe(true);
+    expect(response.body.page).toBe(1);
+    expect(response.body.limit).toBeLessThanOrEqual(100);
+  });
+
+  it('/users (GET) - Filter users by email (Protected)', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/users?search=test@example.com')
+      .set('Authorization', `Bearer ${jwtToken}`)
+      .expect(200);
+    expect(Array.isArray(response.body.data)).toBe(true);
+    expect(response.body.data.some(u => u.email === testUser.email)).toBe(true);
   });
 
   it('/users/:id (GET) - Get specific user (Protected)', async () => {

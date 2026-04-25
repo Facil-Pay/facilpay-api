@@ -21,6 +21,7 @@ describe('AuthService', () => {
 
   const mockJwtService = {
     sign: jest.fn(),
+    signAsync: jest.fn(),
   };
 
   const mockAppLogger = {
@@ -30,6 +31,10 @@ describe('AuthService', () => {
       debug: jest.fn(),
       warn: jest.fn(),
     })),
+  };
+
+  const mockMailService = {
+    sendVerificationEmail: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -47,6 +52,14 @@ describe('AuthService', () => {
         {
           provide: AppLogger,
           useValue: mockAppLogger,
+        },
+        {
+          provide: require('./mail/mail.service').MailService,
+          useValue: mockMailService,
+        },
+        {
+          provide: 'RefreshTokenRepository',
+          useValue: { save: jest.fn().mockResolvedValue({}) },
         },
       ],
     }).compile();
@@ -84,7 +97,7 @@ describe('AuthService', () => {
       expect(usersService.findByEmail).toHaveBeenCalledWith(registerDto.email);
       expect(usersService.create).toHaveBeenCalledWith(registerDto);
       expect(result).toEqual({
-        message: 'User registered successfully',
+        message: 'User registered successfully. Please check your email to verify your account.',
         user: createdUser,
       });
     });
@@ -128,11 +141,13 @@ describe('AuthService', () => {
         password: 'hashedpassword',
         createdAt: new Date(),
         updatedAt: new Date(),
+        isEmailVerified: true,
       };
 
       mockUsersService.findByEmail.mockResolvedValue(user);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       mockJwtService.sign.mockReturnValue('jwt-token-123');
+      mockJwtService.signAsync.mockResolvedValue('jwt-token-123');
 
       const result = await service.login(loginDto);
 
@@ -141,17 +156,19 @@ describe('AuthService', () => {
         loginDto.password,
         user.password,
       );
-      expect(jwtService.sign).toHaveBeenCalledWith({
+      expect(jwtService.signAsync).toHaveBeenCalledWith({
         sub: user.id,
         email: user.email,
       });
-      expect(result).toEqual({
+      expect(result).toMatchObject({
         access_token: 'jwt-token-123',
+        refresh_token: expect.any(String),
         user: {
           id: user.id,
           email: user.email,
           createdAt: user.createdAt,
           updatedAt: user.updatedAt,
+          isEmailVerified: true,
         },
       });
       expect(result.user).not.toHaveProperty('password');
