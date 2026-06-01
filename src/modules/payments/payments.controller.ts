@@ -7,6 +7,7 @@ import {
   HttpCode,
   HttpStatus,
   UseGuards,
+  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -37,7 +38,15 @@ export class PaymentsController {
   @Post()
   @ApiOperation({
     summary: 'Create a payment',
-    description: 'Initiates a new payment record with PENDING status.',
+    description:
+      'Initiates a new payment record with PENDING status. Supports idempotency via Idempotency-Key header.',
+  })
+  @ApiHeader({
+    name: 'Idempotency-Key',
+    description:
+      'Optional unique key for idempotent requests. If provided, duplicate requests with the same key will return the cached response.',
+    required: false,
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
   })
   @ApiBody({ type: CreatePaymentDto })
   @ApiCreatedResponse({
@@ -67,9 +76,14 @@ export class PaymentsController {
     },
   })
   @ApiUnprocessableEntityResponse({
-    description: 'Unprocessable entity.',
+    description:
+      'Unprocessable entity. May occur if idempotency key is reused with a different request body.',
     schema: {
-      example: { statusCode: 422, message: 'Unprocessable Entity' },
+      example: {
+        statusCode: 422,
+        message: 'Idempotency key reused with different request body',
+        error: 'Unprocessable Entity',
+      },
     },
   })
   @ApiInternalServerErrorResponse({
@@ -78,8 +92,11 @@ export class PaymentsController {
       example: { statusCode: 500, message: 'Internal server error' },
     },
   })
-  create(@Body() createPaymentDto: CreatePaymentDto) {
-    return this.paymentsService.create(createPaymentDto);
+  create(
+    @Body() createPaymentDto: CreatePaymentDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    return this.paymentsService.create(createPaymentDto, idempotencyKey);
   }
 
   @Get()
