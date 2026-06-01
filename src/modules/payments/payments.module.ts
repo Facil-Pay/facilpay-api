@@ -9,17 +9,22 @@ import { WebhookGuard } from './webhook.guard';
 import { IdempotencyKey } from './idempotency.entity';
 import { IdempotencyService } from './idempotency.service';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
+import { CurrencyConfigService } from './currency-config.service';
+import { CurrenciesController } from './currencies.controller';
+
 
 @Module({
   imports: [TypeOrmModule.forFeature([Payment, Refund, IdempotencyKey])],
-  controllers: [PaymentsController],
+  controllers: [PaymentsController, CurrenciesController],
+
   providers: [
     PaymentsService,
     WebhookSignatureService,
     WebhookGuard,
     IdempotencyService,
     IdempotencyInterceptor,
+    CurrencyConfigService,
   ],
   exports: [PaymentsService, WebhookSignatureService, WebhookGuard],
 })
-export class PaymentsModule {}
+export class PaymentsModule { }

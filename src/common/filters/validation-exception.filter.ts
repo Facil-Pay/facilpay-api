@@ -3,8 +3,10 @@ import {
   Catch,
   ArgumentsHost,
   BadRequestException,
+  UnprocessableEntityException,
   HttpStatus,
 } from '@nestjs/common';
+
 import { Response, Request } from 'express';
 import {
   ErrorResponse,
@@ -15,9 +17,11 @@ import {
  * Custom exception filter for handling validation errors
  * Provides a standardized error response format for all validation failures
  */
-@Catch(BadRequestException)
+@Catch(BadRequestException, UnprocessableEntityException)
 export class ValidationExceptionFilter implements ExceptionFilter {
-  catch(exception: BadRequestException, host: ArgumentsHost) {
+
+  catch(exception: BadRequestException | UnprocessableEntityException, host: ArgumentsHost) {
+
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();

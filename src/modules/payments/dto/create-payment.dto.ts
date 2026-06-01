@@ -8,6 +8,8 @@ import {
   IsPositive,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
+
 
 export class CreatePaymentDto {
   @IsNumber()
@@ -23,13 +25,14 @@ export class CreatePaymentDto {
 
   @IsString()
   @IsNotEmpty({ message: 'Currency is required' })
-  @MaxLength(3, { message: 'Currency code must be 3 characters' })
   @ApiProperty({
-    description: 'Currency code (ISO 4217)',
+    description: 'Currency code (ISO 4217). Must be supported by this API instance.',
     example: 'USD',
     maxLength: 3,
   })
+  @IsISO4217CurrencyCode({ supportedOnly: true })
   currency: string;
+
 
   @IsString()
   @IsOptional()
