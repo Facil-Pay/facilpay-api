@@ -13,7 +13,7 @@ describe('UsersController', () => {
     findAll: jest.fn(),
     findOne: jest.fn(),
     update: jest.fn(),
-    remove: jest.fn(),
+    softDelete: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -140,11 +140,11 @@ describe('UsersController', () => {
     it('should remove a user', async () => {
       const userId = '123';
 
-      mockUsersService.remove.mockResolvedValue(undefined);
+      mockUsersService.softDelete.mockResolvedValue(undefined);
 
       const result = await controller.remove(userId);
 
-      expect(service.remove).toHaveBeenCalledWith(userId);
+      expect(service.softDelete).toHaveBeenCalledWith(userId);
       expect(result).toBeUndefined();
     });
   });

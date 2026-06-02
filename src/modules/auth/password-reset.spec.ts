@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import { MailService } from './mail/mail.service';
+import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
@@ -51,6 +52,16 @@ describe('AuthService - Password Reset', () => {
           provide: MailService,
           useValue: {
             sendPasswordResetEmail: jest.fn(),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key) => {
+              if (key === 'PASSWORD_RESET_EXPIRES_IN') return '15m';
+              if (key === 'JWT_EXPIRES_IN') return '24h';
+              return null;
+            }),
           },
         },
         {

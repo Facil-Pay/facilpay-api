@@ -4,6 +4,7 @@ import { DataSource, Repository, QueryRunner } from 'typeorm';
 import { NotFoundException } from '@nestjs/common';
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentStatus } from './payment.entity';
+import { Refund } from './refund.entity';
 import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
 
@@ -57,6 +58,15 @@ describe('PaymentsService - Transactions', () => {
         PaymentsService,
         {
           provide: getRepositoryToken(Payment),
+          useValue: {
+            create: jest.fn(),
+            save: jest.fn(),
+            find: jest.fn(),
+            findOneBy: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(Refund),
           useValue: {
             create: jest.fn(),
             save: jest.fn(),

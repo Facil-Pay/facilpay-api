@@ -5,6 +5,7 @@ import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
 import { DataSource } from 'typeorm';
 import { AppLogger } from '../logger/logger.service';
+import { IdempotencyService } from './idempotency.service';
 import {
   NotFoundException,
   ConflictException,
@@ -66,6 +67,13 @@ describe('PaymentsService - Refunds', () => {
               error: jest.fn(),
               debug: jest.fn(),
             }),
+          },
+        },
+        {
+          provide: IdempotencyService,
+          useValue: {
+            checkIdempotencyKey: jest.fn().mockResolvedValue(null),
+            storeIdempotencyKey: jest.fn().mockResolvedValue(undefined),
           },
         },
       ],
