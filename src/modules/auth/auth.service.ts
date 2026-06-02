@@ -3,7 +3,10 @@ import {
   UnauthorizedException,
   ForbiddenException,
   BadRequestException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -33,6 +36,8 @@ import { MailService } from './mail/mail.service';
 @Injectable()
 export class AuthService {
   private readonly logger: Logger;
+  private readonly maxFailedAttempts: number;
+  private readonly lockDurationMinutes: number;
   private readonly twoFactorIssuer = 'FacilPay';
 
   constructor(
@@ -47,6 +52,8 @@ export class AuthService {
     appLogger: AppLogger,
   ) {
     this.logger = appLogger.child({ module: AuthService.name });
+    this.maxFailedAttempts = this.configService.get<number>('LOGIN_MAX_ATTEMPTS', 5);
+    this.lockDurationMinutes = this.configService.get<number>('LOGIN_LOCK_DURATION_MINUTES', 15);
   }
 
   async register(
@@ -96,6 +103,26 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // Check if account is locked
+    if (this.usersService.isAccountLocked(user)) {
+      const secondsUntilUnlock = this.usersService.getSecondsUntilUnlock(user);
+      const error: any = new HttpException(
+        {
+          statusCode: 423,
+          message: `Account is locked. Please try again in ${secondsUntilUnlock} seconds.`,
+          error: 'Locked',
+        },
+        HttpStatus.LOCKED,
+      );
+      error.getResponse = () => ({
+        statusCode: 423,
+        message: `Account is locked. Please try again in ${secondsUntilUnlock} seconds.`,
+        error: 'Locked',
+      });
+      error.getStatus = () => 423;
+      throw error;
+    }
+
     if (user.deletedAt) {
       throw new ForbiddenException(
         'This account has been deleted. Please contact support to restore your account.',
@@ -107,6 +134,12 @@ export class AuthService {
       user.password,
     );
     if (!isPasswordValid) {
+      // Increment failed login attempts
+      await this.usersService.incrementFailedLoginAttempts(
+        user.id,
+        this.maxFailedAttempts,
+        this.lockDurationMinutes,
+      );
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -116,6 +149,8 @@ export class AuthService {
       );
     }
 
+    // Reset failed login attempts on successful login
+    await this.usersService.resetFailedLoginAttempts(user.id);
     if (user.twoFactorEnabled) {
       if (!loginDto.twoFactorCode) {
         return {

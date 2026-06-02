@@ -4,6 +4,7 @@ import {
   Get,
   Body,
   Query,
+  Param,
   HttpCode,
   HttpStatus,
   Res,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AuthService } from './auth.service';
+import { UsersService } from '../users/users.service';
 import { RegisterDto } from '../users/dto/register.dto';
 import { LoginDto } from '../users/dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -20,6 +22,8 @@ import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { TwoFactorCodeDto } from './dto/two-factor-code.dto';
 import { AuthThrottle } from '../throttler/throttler.decorator';
 import { Public } from './decorators/public.decorator';
+import { RolesGuard } from './roles.guard';
+import { Roles } from './decorators/roles.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { User } from '../users/user.entity';
@@ -37,11 +41,17 @@ import {
   ApiTooManyRequestsResponse,
   ApiUnauthorizedResponse,
   ApiBadRequestResponse,
+  ApiParam,
+  ApiResponse,
 } from '@nestjs/swagger';
 
 @ApiTags('auth')
 @Controller('v1/auth')
 export class AuthController {
+  constructor(
+    private authService: AuthService,
+    private usersService: UsersService,
+  ) { }
   constructor(private authService: AuthService) {}
 
   @AuthThrottle()
@@ -106,7 +116,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Login',
     description:
-      'Authenticates a verified user and returns JWT access token, refresh token, and user. Rate limited to 5 requests per 15 minutes.',
+      'Authenticates a verified user and returns JWT access token, refresh token, and user. Implements account lockout after 5 failed attempts (15 minutes). Rate limited to 5 requests per 15 minutes.',
   })
   @ApiBody({
     type: LoginDto,
@@ -134,12 +144,14 @@ export class AuthController {
       },
     },
   })
-  @ApiAcceptedResponse({
-    description: 'Password accepted, but a two-factor code is required.',
+  @ApiResponse({
+    status: 423,
+    description: 'Account locked due to too many failed login attempts.',
     schema: {
       example: {
-        '2fa_required': true,
-        message: 'Two-factor authentication code required',
+        statusCode: 423,
+        message: 'Account is locked. Please try again in 900 seconds.',
+        error: 'Locked',
       },
     },
   })
@@ -154,7 +166,7 @@ export class AuthController {
     },
   })
   @ApiForbiddenResponse({
-    description: 'Email not verified.',
+    description: 'Email not verified or account deleted.',
     schema: {
       example: {
         statusCode: 403,
@@ -432,5 +444,59 @@ export class AuthController {
   })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN')
+  @Post('unlock/:userId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Unlock account (Admin only)',
+    description:
+      'Manually unlocks a user account and resets failed login attempt counter. Requires ADMIN role.',
+  })
+  @ApiParam({
+    name: 'userId',
+    description: 'User ID to unlock',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @ApiOkResponse({
+    description: 'Account unlocked successfully.',
+    schema: {
+      example: {
+        id: 'abc123',
+        email: 'user@example.com',
+        roles: ['USER'],
+        isEmailVerified: true,
+        isActive: true,
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T10:00:00.000Z',
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'User does not have ADMIN role.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Forbidden resource',
+        error: 'Forbidden',
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'User not found.',
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'User with ID abc123 not found',
+        error: 'Not Found',
+      },
+    },
+  })
+  async unlockAccount(@Param('userId') userId: string) {
+    return this.usersService.unlockAccount(userId);
   }
 }

@@ -1,8 +1,6 @@
-import {
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -13,10 +11,13 @@ import { Logger } from 'pino';
 
 @Injectable()
 export class UsersService {
-  private users: User[] = [];
   private readonly logger: Logger;
 
-  constructor(appLogger: AppLogger) {
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    appLogger: AppLogger,
+  ) {
     this.logger = appLogger.child({ module: UsersService.name });
   }
 
@@ -25,22 +26,18 @@ export class UsersService {
   ): Promise<Omit<User, 'password' | 'twoFactorSecret'>> {
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
-    const user: User = {
-      id: Math.random().toString(36).substring(7),
+    const user = this.userRepository.create({
       email: createUserDto.email,
       password: hashedPassword,
       roles: [UserRole.USER],
       isEmailVerified: false,
       isActive: true,
-      twoFactorSecret: null,
-      twoFactorEnabled: false,
-      deletedAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+    });
 
-    this.users.push(user);
-    const result = this.sanitizeUser(user);
+    const savedUser = await this.userRepository.save(user);
+    const { password, ...result } = savedUser;
     this.logger.info(
       { userId: result.id, email: result.email },
       'User created',
@@ -53,50 +50,40 @@ export class UsersService {
     limit?: number;
     sortBy?: string;
     search?: string;
-  }): Promise<
-    import('../../common/interfaces').PaginatedResult<
-      Omit<User, 'password' | 'twoFactorSecret'>
-    >
-  > {
-    // Filter out soft-deleted users
-    let filtered = this.users.filter((u) => !u.deletedAt);
+  }): Promise<import('../../common/interfaces').PaginatedResult<Omit<User, 'password'>>> {
+    const query = this.userRepository.createQueryBuilder('user')
+      .where('user.deletedAt IS NULL');
 
     // Filtering by email (partial match)
     if (params?.search) {
-      const searchLower = params.search.toLowerCase();
-      filtered = filtered.filter((u) =>
-        u.email.toLowerCase().includes(searchLower),
-      );
-    }
-    // Sorting
-    if (
-      params?.sortBy &&
-      ['email', 'createdAt', 'updatedAt'].includes(params.sortBy)
-    ) {
-      const sortKey = params.sortBy as 'email' | 'createdAt' | 'updatedAt';
-      filtered = filtered.slice().sort((a, b) => {
-        if (sortKey === 'email') {
-          return a.email.localeCompare(b.email);
-        }
-        return new Date(a[sortKey]).getTime() - new Date(b[sortKey]).getTime();
+      query.andWhere('user.email ILIKE :search', {
+        search: `%${params.search}%`,
       });
     }
+
+    // Sorting
+    if (params?.sortBy && ['email', 'createdAt', 'updatedAt'].includes(params.sortBy)) {
+      query.orderBy(`user.${params.sortBy}`, 'ASC');
+    }
+
     // Pagination
     const page = Math.max(1, params?.page ?? 1);
     const limit = Math.min(Math.max(1, params?.limit ?? 20), 100);
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    const data = filtered
-      .slice(start, end)
-      .map((user) => this.sanitizeUser(user));
+    const skip = (page - 1) * limit;
+
+    const [users, total] = await query
+      .skip(skip)
+      .take(limit)
+      .getManyAndCount();
+
+    const data = users.map(({ password, ...rest }) => rest);
     return { data, total, page, limit };
   }
 
-  async findOne(
-    id: string,
-  ): Promise<Omit<User, 'password' | 'twoFactorSecret'>> {
-    const user = this.users.find((user) => user.id === id && !user.deletedAt);
+  async findOne(id: string): Promise<Omit<User, 'password'>> {
+    const user = await this.userRepository.findOne({
+      where: { id, deletedAt: null },
+    });
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
@@ -104,7 +91,9 @@ export class UsersService {
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
-    return this.users.find((user) => user.email === email && !user.deletedAt);
+    return await this.userRepository.findOne({
+      where: { email, deletedAt: null },
+    });
   }
 
   async findByIdWithSecrets(id: string): Promise<User> {
@@ -118,11 +107,11 @@ export class UsersService {
   async update(
     id: string,
     updateUserDto: UpdateUserDto,
-  ): Promise<Omit<User, 'password' | 'twoFactorSecret'>> {
-    const userIndex = this.users.findIndex(
-      (user) => user.id === id && !user.deletedAt,
-    );
-    if (userIndex === -1) {
+  ): Promise<Omit<User, 'password'>> {
+    const user = await this.userRepository.findOne({
+      where: { id, deletedAt: null },
+    });
+    if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
 
@@ -131,15 +120,12 @@ export class UsersService {
       updates.password = await bcrypt.hash(updateUserDto.password, 10);
     }
 
-    const updatedUser = {
-      ...this.users[userIndex],
-      ...updates,
-      updatedAt: new Date(),
-    };
+    Object.assign(user, updates);
+    user.updatedAt = new Date();
 
-    this.users[userIndex] = updatedUser;
+    const updatedUser = await this.userRepository.save(user);
+    const { password, ...result } = updatedUser;
 
-    const result = this.sanitizeUser(updatedUser);
     const updatedFields = Object.keys(updateUserDto).filter(
       (key) => key !== 'password',
     );
@@ -150,91 +136,176 @@ export class UsersService {
   }
 
   async softDelete(id: string): Promise<void> {
-    const userIndex = this.users.findIndex(
-      (user) => user.id === id && !user.deletedAt,
-    );
-    if (userIndex === -1) {
+    const user = await this.userRepository.findOne({
+      where: { id, deletedAt: null },
+    });
+    if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
-    this.users[userIndex].deletedAt = new Date();
-    this.users[userIndex].isActive = false;
-    this.users[userIndex].updatedAt = new Date();
+    user.deletedAt = new Date();
+    user.isActive = false;
+    user.updatedAt = new Date();
+    await this.userRepository.save(user);
     this.logger.info({ userId: id }, 'User soft deleted');
   }
 
   async remove(id: string): Promise<void> {
-    const userIndex = this.users.findIndex((user) => user.id === id);
-    if (userIndex === -1) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
-    this.users.splice(userIndex, 1);
+    await this.userRepository.remove(user);
     this.logger.info({ userId: id }, 'User removed');
   }
 
-  async restore(
-    id: string,
-  ): Promise<Omit<User, 'password' | 'twoFactorSecret'>> {
-    const userIndex = this.users.findIndex(
-      (user) => user.id === id && user.deletedAt,
-    );
-    if (userIndex === -1) {
+  async restore(id: string): Promise<Omit<User, 'password'>> {
+    const user = await this.userRepository.findOne({
+      where: { id, deletedAt: null },
+    });
+    if (!user) {
       throw new NotFoundException(`Deleted user with ID ${id} not found`);
     }
-    this.users[userIndex].deletedAt = null;
-    this.users[userIndex].isActive = true;
-    this.users[userIndex].updatedAt = new Date();
-    const result = this.sanitizeUser(this.users[userIndex]);
+    user.deletedAt = null;
+    user.isActive = true;
+    user.updatedAt = new Date();
+    const savedUser = await this.userRepository.save(user);
+    const { password, ...result } = savedUser;
     this.logger.info({ userId: id }, 'User restored');
     return result;
   }
 
   async verifyEmail(id: string): Promise<void> {
-    const userIndex = this.users.findIndex(
-      (user) => user.id === id && !user.deletedAt,
-    );
-    if (userIndex === -1) {
+    const user = await this.userRepository.findOne({
+      where: { id, deletedAt: null },
+    });
+    if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
-    this.users[userIndex].isEmailVerified = true;
-    this.users[userIndex].updatedAt = new Date();
+    user.isEmailVerified = true;
+    user.updatedAt = new Date();
+    await this.userRepository.save(user);
     this.logger.info({ userId: id }, 'User email verified');
   }
 
   async updatePassword(id: string, hashedPassword: string): Promise<void> {
-    const userIndex = this.users.findIndex((user) => user.id === id);
-    if (userIndex === -1) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
-    this.users[userIndex].password = hashedPassword;
-    this.users[userIndex].updatedAt = new Date();
+    user.password = hashedPassword;
+    user.updatedAt = new Date();
+    await this.userRepository.save(user);
     this.logger.info({ userId: id }, 'User password updated');
   }
 
-  async setTwoFactorSecret(id: string, encryptedSecret: string): Promise<void> {
-    const user = await this.findByIdWithSecrets(id);
-    user.twoFactorSecret = encryptedSecret;
-    user.twoFactorEnabled = false;
+  /**
+   * Increment failed login attempts and lock account if threshold reached
+   */
+  async incrementFailedLoginAttempts(
+    userId: string,
+    maxAttempts: number = 5,
+    lockDurationMinutes: number = 15,
+  ): Promise<number> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
     user.updatedAt = new Date();
-    this.logger.info({ userId: id }, 'Two-factor secret generated');
+
+    // Lock account if max attempts reached
+    if (user.failedLoginAttempts >= maxAttempts) {
+      user.lockedUntil = new Date(Date.now() + lockDurationMinutes * 60 * 1000);
+      this.logger.warn(
+        { userId, failedAttempts: user.failedLoginAttempts },
+        'Account locked due to failed login attempts',
+      );
+    } else {
+      this.logger.debug(
+        { userId, failedAttempts: user.failedLoginAttempts },
+        'Failed login attempt recorded',
+      );
+    }
+
+    await this.userRepository.save(user);
+    return user.failedLoginAttempts;
   }
 
-  async enableTwoFactor(id: string): Promise<void> {
-    const user = await this.findByIdWithSecrets(id);
-    user.twoFactorEnabled = true;
-    user.updatedAt = new Date();
-    this.logger.info({ userId: id }, 'Two-factor authentication enabled');
+  /**
+   * Reset failed login attempts on successful login
+   */
+  async resetFailedLoginAttempts(userId: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+      user.failedLoginAttempts = 0;
+      user.lockedUntil = null;
+      user.updatedAt = new Date();
+      await this.userRepository.save(user);
+      this.logger.info(
+        { userId },
+        'Failed login attempts reset on successful login',
+      );
+    }
   }
 
-  async disableTwoFactor(id: string): Promise<void> {
-    const user = await this.findByIdWithSecrets(id);
-    user.twoFactorSecret = null;
-    user.twoFactorEnabled = false;
-    user.updatedAt = new Date();
-    this.logger.info({ userId: id }, 'Two-factor authentication disabled');
+  /**
+   * Check if account is locked
+   */
+  isAccountLocked(user: User): boolean {
+    if (!user.lockedUntil) {
+      return false;
+    }
+
+    const now = new Date();
+    const isLocked = new Date(user.lockedUntil) > now;
+
+    // Clear lock if expired
+    if (!isLocked && user.lockedUntil) {
+      user.lockedUntil = null;
+      user.failedLoginAttempts = 0;
+      this.userRepository.save(user);
+    }
+
+    return isLocked;
   }
 
-  private sanitizeUser(user: User): Omit<User, 'password' | 'twoFactorSecret'> {
-    const { password, twoFactorSecret, ...result } = user;
+  /**
+   * Get seconds remaining until account is unlocked
+   */
+  getSecondsUntilUnlock(user: User): number {
+    if (!user.lockedUntil) {
+      return 0;
+    }
+
+    const now = new Date();
+    const unlockTime = new Date(user.lockedUntil);
+    const secondsRemaining = Math.ceil((unlockTime.getTime() - now.getTime()) / 1000);
+
+    return Math.max(0, secondsRemaining);
+  }
+
+  /**
+   * Manually unlock an account (admin only)
+   */
+  async unlockAccount(userId: string): Promise<Omit<User, 'password'>> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+    user.updatedAt = new Date();
+
+    const savedUser = await this.userRepository.save(user);
+    this.logger.info({ userId }, 'Account unlocked by admin');
+
+    const { password, ...result } = savedUser;
     return result;
   }
 }
