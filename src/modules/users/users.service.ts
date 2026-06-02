@@ -21,7 +21,9 @@ export class UsersService {
     this.logger = appLogger.child({ module: UsersService.name });
   }
 
-  async create(createUserDto: CreateUserDto): Promise<Omit<User, 'password'>> {
+  async create(
+    createUserDto: CreateUserDto,
+  ): Promise<Omit<User, 'password' | 'twoFactorSecret'>> {
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
 
     const user = this.userRepository.create({
@@ -85,14 +87,21 @@ export class UsersService {
     if (!user) {
       throw new NotFoundException(`User with ID ${id} not found`);
     }
-    const { password, ...result } = user;
-    return result;
+    return this.sanitizeUser(user);
   }
 
   async findByEmail(email: string): Promise<User | undefined> {
     return await this.userRepository.findOne({
       where: { email, deletedAt: null },
     });
+  }
+
+  async findByIdWithSecrets(id: string): Promise<User> {
+    const user = this.users.find((user) => user.id === id && !user.deletedAt);
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    return user;
   }
 
   async update(

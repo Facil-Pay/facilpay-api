@@ -11,6 +11,9 @@ describe('AuthController', () => {
   const mockAuthService = {
     register: jest.fn(),
     login: jest.fn(),
+    enableTwoFactor: jest.fn(),
+    verifyTwoFactor: jest.fn(),
+    disableTwoFactor: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -77,9 +80,30 @@ describe('AuthController', () => {
 
       mockAuthService.login.mockResolvedValue(expectedResult);
 
-      const result = await controller.login(loginDto);
+      const response = { status: jest.fn() } as any;
+      const result = await controller.login(loginDto, response);
 
       expect(authService.login).toHaveBeenCalledWith(loginDto);
+      expect(response.status).not.toHaveBeenCalled();
+      expect(result).toEqual(expectedResult);
+    });
+
+    it('should return 202 when two-factor code is required', async () => {
+      const loginDto: LoginDto = {
+        email: 'test@example.com',
+        password: 'password123',
+      };
+      const response = { status: jest.fn() } as any;
+      const expectedResult = {
+        '2fa_required': true,
+        message: 'Two-factor authentication code required',
+      };
+
+      mockAuthService.login.mockResolvedValue(expectedResult);
+
+      const result = await controller.login(loginDto, response);
+
+      expect(response.status).toHaveBeenCalledWith(202);
       expect(result).toEqual(expectedResult);
     });
   });

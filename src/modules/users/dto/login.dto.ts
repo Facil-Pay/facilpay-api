@@ -2,10 +2,12 @@ import {
   IsEmail,
   IsString,
   IsNotEmpty,
+  IsOptional,
   MaxLength,
   MinLength,
+  Matches,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class LoginDto {
   @IsEmail({}, { message: 'Please provide a valid email address' })
@@ -26,4 +28,14 @@ export class LoginDto {
     example: 'P@ssw0rd!',
   })
   password: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'Two-factor code must be 6 digits' })
+  @ApiPropertyOptional({
+    description:
+      'Six-digit authenticator app code. Required when 2FA is enabled.',
+    example: '123456',
+  })
+  twoFactorCode?: string;
 }

@@ -14,3 +14,8 @@ export const WebhookThrottle = () => Throttle({ webhook: 1000 } as any);
  * Apply default throttle limit (100 requests per minute)
  */
 export const DefaultThrottle = () => Throttle({ default: 100 } as any);
+
+/**
+ * Apply bulk payment throttle limit (20 requests per minute)
+ */
+export const BulkThrottle = () => Throttle({ bulk: 20 } as any);

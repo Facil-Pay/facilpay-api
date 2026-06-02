@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { UnauthorizedException } from '@nestjs/common';
 import { AppLogger } from '../logger/logger.service';
 import * as bcrypt from 'bcrypt';
@@ -17,6 +18,10 @@ describe('AuthService', () => {
     findByEmail: jest.fn(),
     create: jest.fn(),
     findOne: jest.fn(),
+    findByIdWithSecrets: jest.fn(),
+    setTwoFactorSecret: jest.fn(),
+    enableTwoFactor: jest.fn(),
+    disableTwoFactor: jest.fn(),
   };
 
   const mockJwtService = {
@@ -37,6 +42,15 @@ describe('AuthService', () => {
     sendVerificationEmail: jest.fn(),
   };
 
+  const mockConfigService = {
+    get: jest.fn((key: string) => {
+      if (key === 'TWO_FACTOR_ENCRYPTION_KEY') {
+        return 'test-two-factor-encryption-key';
+      }
+      return undefined;
+    }),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -50,6 +64,10 @@ describe('AuthService', () => {
           useValue: mockJwtService,
         },
         {
+          provide: ConfigService,
+          useValue: mockConfigService,
+        },
+        {
           provide: AppLogger,
           useValue: mockAppLogger,
         },
@@ -59,6 +77,10 @@ describe('AuthService', () => {
         },
         {
           provide: 'RefreshTokenRepository',
+          useValue: { save: jest.fn().mockResolvedValue({}) },
+        },
+        {
+          provide: 'PasswordResetTokenRepository',
           useValue: { save: jest.fn().mockResolvedValue({}) },
         },
       ],
@@ -97,7 +119,8 @@ describe('AuthService', () => {
       expect(usersService.findByEmail).toHaveBeenCalledWith(registerDto.email);
       expect(usersService.create).toHaveBeenCalledWith(registerDto);
       expect(result).toEqual({
-        message: 'User registered successfully. Please check your email to verify your account.',
+        message:
+          'User registered successfully. Please check your email to verify your account.',
         user: createdUser,
       });
     });

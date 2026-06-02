@@ -83,7 +83,57 @@ export class PaymentsService {
     } catch (error) {
       await queryRunner.rollbackTransaction();
       this.logger.error(
-        `Payment creation failed and rolled back: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        `Payment creation failed and rolled back: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async createBulk(
+    createPaymentDtos: CreatePaymentDto[],
+  ): Promise<{ created: number; payments: Payment[] }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      this.logger.debug(
+        `Starting bulk payment creation transaction for ${
+          createPaymentDtos.length
+        } items.`,
+      );
+
+      const payments = createPaymentDtos.map((createPaymentDto) =>
+        queryRunner.manager.create(Payment, {
+          ...createPaymentDto,
+          status: PaymentStatus.PENDING,
+        }),
+      );
+
+      const savedPayments = await queryRunner.manager.save(payments);
+
+      await queryRunner.commitTransaction();
+      this.logger.info(
+        `Bulk payment creation succeeded: ${savedPayments.length} payments created.`,
+      );
+
+      return {
+        created: Array.isArray(savedPayments) ? savedPayments.length : 0,
+        payments: Array.isArray(savedPayments)
+          ? savedPayments
+          : [savedPayments],
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Bulk payment creation failed and rolled back: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
       );
       throw error;
     } finally {

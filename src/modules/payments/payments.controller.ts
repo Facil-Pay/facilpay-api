@@ -10,6 +10,7 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  Headers,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -26,14 +27,17 @@ import {
   ApiUnprocessableEntityResponse,
   ApiResponse,
 } from '@nestjs/swagger';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
+import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-response.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto } from './dto/get-payments.dto';
 import { Payment } from './payment.entity';
 import { Refund } from './refund.entity';
-import { WebhookThrottle } from '../throttler/throttler.decorator';
+import { WebhookThrottle, BulkThrottle } from '../throttler/throttler.decorator';
 import { WebhookGuard } from './webhook.guard';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 
@@ -104,6 +108,61 @@ export class PaymentsController {
     @Headers('idempotency-key') idempotencyKey?: string,
   ) {
     return this.paymentsService.create(createPaymentDto, idempotencyKey);
+  }
+
+  @BulkThrottle()
+  @Post('bulk')
+  @ApiOperation({
+    summary: 'Create multiple payments in a single transaction',
+    description:
+      'Creates up to 100 payments atomically. If any payment object is invalid or fails, the entire batch is rolled back.',
+  })
+  @ApiBody({ type: CreatePaymentDto, isArray: true })
+  @ApiCreatedResponse({
+    description: 'Bulk payments created successfully.',
+    type: BulkCreatePaymentsResponseDto,
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Validation failed, request body is empty, or batch size exceeds 100 items.',
+    schema: {
+      example: {
+        statusCode: 400,
+        message:
+          'Payment batch must contain between 1 and 100 payment objects.',
+        error: 'Bad Request',
+      },
+    },
+  })
+  async createBulk(@Body() createPaymentDtos: CreatePaymentDto[]) {
+    if (!Array.isArray(createPaymentDtos)) {
+      throw new BadRequestException(
+        'Request body must be an array of payment objects.',
+      );
+    }
+
+    if (createPaymentDtos.length === 0 || createPaymentDtos.length > 100) {
+      throw new BadRequestException(
+        'Payment batch must contain between 1 and 100 payment objects.',
+      );
+    }
+
+    const paymentInstances = plainToInstance(
+      CreatePaymentDto,
+      createPaymentDtos,
+    );
+
+    const validationResults = await Promise.all(
+      paymentInstances.map((paymentDto) => validate(paymentDto)),
+    );
+
+    const errors = validationResults.flatMap((result) => result);
+
+    if (errors.length > 0) {
+      throw new BadRequestException(errors);
+    }
+
+    return this.paymentsService.createBulk(paymentInstances);
   }
 
   @Get()

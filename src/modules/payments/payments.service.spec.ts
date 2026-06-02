@@ -3,6 +3,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentStatus } from './payment.entity';
+import { Refund } from './refund.entity';
 import { NotFoundException } from '@nestjs/common';
 import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
@@ -62,6 +63,15 @@ describe('PaymentsService', () => {
         {
           provide: getRepositoryToken(Payment),
           useValue: mockPaymentRepository,
+        },
+        {
+          provide: getRepositoryToken(Refund),
+          useValue: {
+            create: jest.fn(),
+            save: jest.fn(),
+            find: jest.fn(),
+            findOneBy: jest.fn(),
+          },
         },
         {
           provide: DataSource,
@@ -152,6 +162,109 @@ describe('PaymentsService', () => {
       );
 
       await expect(service.create(dto)).rejects.toThrow(error);
+
+      expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
+      expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
+      expect(mockQueryRunner.release).toHaveBeenCalled();
+    });
+  });
+
+  describe('createBulk', () => {
+    it('should create multiple payments inside a single transaction', async () => {
+      const createDtos = [
+        { amount: 50.0, currency: 'USD' },
+        { amount: 75.5, currency: 'USD' },
+      ];
+
+      const savedPayments = [
+        {
+          id: 'uuid-1',
+          amount: 50.0,
+          currency: 'USD',
+          status: PaymentStatus.PENDING,
+          description: null,
+          externalReference: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        {
+          id: 'uuid-2',
+          amount: 75.5,
+          currency: 'USD',
+          status: PaymentStatus.PENDING,
+          description: null,
+          externalReference: null,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ];
+
+      const mockQueryRunner = {
+        connect: jest.fn(),
+        startTransaction: jest.fn(),
+        commitTransaction: jest.fn(),
+        rollbackTransaction: jest.fn(),
+        release: jest.fn(),
+        manager: {
+          create: jest
+            .fn()
+            .mockImplementation((entity, payload) => ({ ...payload })),
+          save: jest.fn().mockResolvedValue(savedPayments),
+        },
+      };
+
+      (dataSource.createQueryRunner as jest.Mock).mockReturnValue(
+        mockQueryRunner,
+      );
+
+      const result = await service.createBulk(createDtos as any);
+
+      expect(mockQueryRunner.connect).toHaveBeenCalled();
+      expect(mockQueryRunner.startTransaction).toHaveBeenCalled();
+      expect(mockQueryRunner.manager.create).toHaveBeenCalledTimes(2);
+      expect(mockQueryRunner.manager.save).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            amount: 50.0,
+            currency: 'USD',
+            status: PaymentStatus.PENDING,
+          }),
+          expect.objectContaining({
+            amount: 75.5,
+            currency: 'USD',
+            status: PaymentStatus.PENDING,
+          }),
+        ]),
+      );
+      expect(mockQueryRunner.commitTransaction).toHaveBeenCalled();
+      expect(mockQueryRunner.release).toHaveBeenCalled();
+      expect(result.created).toEqual(2);
+      expect(result.payments).toEqual(savedPayments);
+    });
+
+    it('should rollback the transaction when bulk creation fails', async () => {
+      const createDtos = [{ amount: 50.0, currency: 'USD' }];
+      const error = new Error('Bulk save failed');
+
+      const mockQueryRunner = {
+        connect: jest.fn(),
+        startTransaction: jest.fn(),
+        commitTransaction: jest.fn(),
+        rollbackTransaction: jest.fn(),
+        release: jest.fn(),
+        manager: {
+          create: jest.fn().mockImplementation((entity, payload) => ({ ...payload })),
+          save: jest.fn().mockRejectedValue(error),
+        },
+      };
+
+      (dataSource.createQueryRunner as jest.Mock).mockReturnValue(
+        mockQueryRunner,
+      );
+
+      await expect(service.createBulk(createDtos as any)).rejects.toThrow(
+        error,
+      );
 
       expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
       expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();

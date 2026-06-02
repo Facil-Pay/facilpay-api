@@ -28,6 +28,8 @@ export class User {
   isActive: boolean = true;
 
   @Column({ nullable: true })
+  twoFactorSecret: string | null = null;
+  twoFactorEnabled: boolean = false;
   deletedAt: Date | null = null;
 
   @Column({ default: 0 })
@@ -52,6 +54,12 @@ export class User {
     }
     if (this.isActive === undefined) {
       this.isActive = true;
+    }
+    if (this.twoFactorSecret === undefined) {
+      this.twoFactorSecret = null;
+    }
+    if (this.twoFactorEnabled === undefined) {
+      this.twoFactorEnabled = false;
     }
     if (this.deletedAt === undefined) {
       this.deletedAt = null;
