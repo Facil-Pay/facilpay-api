@@ -12,10 +12,12 @@ import { HttpLoggerMiddleware } from './modules/logger/http-logger.middleware';
 import { ThrottlerConfigModule } from './modules/throttler/throttler.config.module';
 import { StellarModule } from './modules/stellar/stellar.module';
 import { CorsModule } from './modules/cors/cors.module';
+import { CircuitBreakerModule } from './modules/circuit-breaker/circuit-breaker.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    CircuitBreakerModule,
     ThrottlerConfigModule,
     LoggerModule,
     CorsModule,
