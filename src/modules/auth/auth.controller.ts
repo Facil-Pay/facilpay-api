@@ -20,7 +20,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { TwoFactorCodeDto } from './dto/two-factor-code.dto';
-import { AuthThrottle } from '../throttler/throttler.decorator';
+import { AuthThrottle, LoginThrottle, RegisterThrottle } from '../throttler/throttler.decorator';
 import { Public } from './decorators/public.decorator';
 import { RolesGuard } from './roles.guard';
 import { Roles } from './decorators/roles.decorator';
@@ -54,12 +54,12 @@ export class AuthController {
   ) { }
   constructor(private authService: AuthService) {}
 
-  @AuthThrottle()
+  @RegisterThrottle()
   @Post('register')
   @ApiOperation({
     summary: 'Register a new user',
     description:
-      'Creates a new user account. Sends a verification email. Rate limited to 5 requests per 15 minutes.',
+      'Creates a new user account. Sends a verification email. Rate limited to 3 requests per 10 minutes per IP.',
   })
   @ApiBody({
     type: RegisterDto,
@@ -110,13 +110,13 @@ export class AuthController {
     return this.authService.register(registerDto);
   }
 
-  @AuthThrottle()
+  @LoginThrottle()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Login',
     description:
-      'Authenticates a verified user and returns JWT access token, refresh token, and user. Implements account lockout after 5 failed attempts (15 minutes). Rate limited to 5 requests per 15 minutes.',
+      'Authenticates a verified user and returns JWT access token, refresh token, and user. Implements account lockout after 5 failed attempts (15 minutes). Rate limited to 5 requests per minute per IP.',
   })
   @ApiBody({
     type: LoginDto,

@@ -1,21 +1,13 @@
 import { Throttle } from '@nestjs/throttler';
 
-/**
- * Apply auth throttle limit (5 requests per 15 minutes)
- */
-export const AuthThrottle = () => Throttle({ auth: 5 } as any);
+export const AuthThrottle = () => Throttle({ auth: { limit: 5, ttl: 900000 } });
 
-/**
- * Apply webhook throttle limit (1000 requests per minute)
- */
-export const WebhookThrottle = () => Throttle({ webhook: 1000 } as any);
+export const LoginThrottle = () => Throttle({ login: { limit: 5, ttl: 60000 } });
 
-/**
- * Apply default throttle limit (100 requests per minute)
- */
-export const DefaultThrottle = () => Throttle({ default: 100 } as any);
+export const RegisterThrottle = () => Throttle({ register: { limit: 3, ttl: 600000 } });
 
-/**
- * Apply bulk payment throttle limit (20 requests per minute)
- */
-export const BulkThrottle = () => Throttle({ bulk: 20 } as any);
+export const WebhookThrottle = () => Throttle({ webhook: { limit: 1000, ttl: 60000 } });
+
+export const DefaultThrottle = () => Throttle({ default: { limit: 100, ttl: 60000 } });
+
+export const BulkThrottle = () => Throttle({ bulk: { limit: 20, ttl: 60000 } });
