@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, UnprocessableEntityException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, LessThanOrEqual, MoreThanOrEqual, Like, Between } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { DataSource, Repository, LessThanOrEqual, MoreThanOrEqual, Like, Between, MoreThan } from 'typeorm';
 import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
@@ -14,6 +15,9 @@ import { IdempotencyService } from './idempotency.service';
 @Injectable()
 export class PaymentsService {
   private readonly logger: Logger;
+  private readonly minAmount: number;
+  private readonly maxAmount: number;
+  private readonly dailyLimitPerUser: number;
 
   constructor(
     @InjectRepository(Payment)
@@ -23,8 +27,48 @@ export class PaymentsService {
     private readonly dataSource: DataSource,
     appLogger: AppLogger,
     private readonly idempotencyService: IdempotencyService,
+    private readonly configService: ConfigService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
+    this.minAmount = this.configService.get<number>('PAYMENT_MIN_AMOUNT', 0.01);
+    this.maxAmount = this.configService.get<number>('PAYMENT_MAX_AMOUNT', Infinity);
+    this.dailyLimitPerUser = this.configService.get<number>('PAYMENT_DAILY_LIMIT_PER_USER', Infinity);
+  }
+
+  private async checkPaymentLimits(amount: number, userId?: string): Promise<void> {
+    if (amount < this.minAmount) {
+      throw new UnprocessableEntityException(
+        `Payment amount ${amount} is below the minimum allowed amount of ${this.minAmount}`,
+      );
+    }
+    if (amount > this.maxAmount) {
+      throw new UnprocessableEntityException(
+        `Payment amount ${amount} exceeds the maximum allowed amount of ${this.maxAmount}`,
+      );
+    }
+
+    if (userId && isFinite(this.dailyLimitPerUser)) {
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+
+      const result = await this.paymentRepository
+        .createQueryBuilder('p')
+        .select('COALESCE(SUM(p.amount), 0)', 'total')
+        .where('p.userId = :userId', { userId })
+        .andWhere('p.createdAt >= :startOfDay', { startOfDay })
+        .andWhere('p.status NOT IN (:...excluded)', {
+          excluded: [PaymentStatus.FAILED, PaymentStatus.CANCELLED],
+        })
+        .getRawOne<{ total: string }>();
+
+      const dailySpend = Number(result?.total ?? 0);
+      if (dailySpend + amount > this.dailyLimitPerUser) {
+        throw new UnprocessableEntityException(
+          `This payment would exceed your daily limit of ${this.dailyLimitPerUser}. ` +
+          `Current daily spend: ${dailySpend.toFixed(2)}`,
+        );
+      }
+    }
   }
 
   /**
@@ -37,7 +81,10 @@ export class PaymentsService {
   async create(
     createPaymentDto: CreatePaymentDto,
     idempotencyKey?: string,
+    userId?: string,
   ): Promise<Payment> {
+    await this.checkPaymentLimits(createPaymentDto.amount, userId);
+
     // Check for existing idempotency key
     if (idempotencyKey) {
       const cachedResponse = await this.idempotencyService.checkIdempotencyKey(
@@ -62,6 +109,7 @@ export class PaymentsService {
       const payment = queryRunner.manager.create(Payment, {
         ...createPaymentDto,
         status: PaymentStatus.PENDING,
+        userId: userId ?? null,
       });
 
       const savedPayment = await queryRunner.manager.save(payment);

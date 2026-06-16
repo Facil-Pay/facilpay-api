@@ -9,6 +9,7 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
+import { IsWithinPaymentLimits } from '../../../common/validators/is-within-payment-limits.validator';
 
 
 export class CreatePaymentDto {
@@ -16,8 +17,9 @@ export class CreatePaymentDto {
   @IsNotEmpty()
   @IsPositive({ message: 'Amount must be a positive number' })
   @Min(0.01, { message: 'Amount must be at least 0.01' })
+  @IsWithinPaymentLimits()
   @ApiProperty({
-    description: 'Payment amount (must be positive)',
+    description: 'Payment amount. Must be within the configured PAYMENT_MIN_AMOUNT and PAYMENT_MAX_AMOUNT limits.',
     example: 100.5,
     minimum: 0.01,
   })

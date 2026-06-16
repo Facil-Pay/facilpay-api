@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { ConfigModule } from '@nestjs/config';
 import { PaymentsService } from './payments.service';
 import { PaymentsController } from './payments.controller';
 import { Payment } from './payment.entity';
@@ -14,7 +15,7 @@ import { CurrenciesController } from './currencies.controller';
 
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Refund, IdempotencyKey])],
+  imports: [TypeOrmModule.forFeature([Payment, Refund, IdempotencyKey]), ConfigModule],
   controllers: [PaymentsController, CurrenciesController],
 
   providers: [

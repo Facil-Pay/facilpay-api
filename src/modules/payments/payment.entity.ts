@@ -34,6 +34,9 @@ export class Payment {
   status: PaymentStatus;
 
   @Column({ nullable: true })
+  userId: string | null = null;
+
+  @Column({ nullable: true })
   externalReference: string;
 
   @Column({ nullable: true })
