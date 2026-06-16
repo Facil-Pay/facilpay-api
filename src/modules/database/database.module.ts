@@ -19,6 +19,13 @@ import { DatabaseLoggerService } from './database-logger.service';
         synchronize:
           configService.get<string>('DATABASE_SYNCHRONIZE', 'false') === 'true',
         logging: configService.get<string>('NODE_ENV') === 'development',
+        extra: {
+          min: configService.get<number>('DB_POOL_MIN', 2),
+          max: configService.get<number>('DB_POOL_MAX', 10),
+          idleTimeoutMillis: configService.get<number>('DB_POOL_IDLE_TIMEOUT_MS', 30000),
+          connectionTimeoutMillis: configService.get<number>('DB_POOL_CONNECTION_TIMEOUT_MS', 5000),
+        },
+        maxQueryExecutionTime: configService.get<number>('DB_SLOW_QUERY_THRESHOLD_MS', 500),
       }),
     }),
   ],
