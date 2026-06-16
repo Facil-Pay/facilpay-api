@@ -12,7 +12,8 @@ export class CorsConfigService {
   }
 
   private loadConfig(): CorsConfig {
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || [];
+    const raw = process.env.CORS_ALLOWED_ORIGINS ?? process.env.ALLOWED_ORIGINS ?? '';
+    const allowedOrigins = raw.split(',').map((s) => s.trim()).filter(Boolean);
     const credentials = process.env.CORS_CREDENTIALS === 'true';
 
     const configData = {
@@ -59,7 +60,17 @@ export class CorsConfigService {
   getCorsOptions(): object {
     const allowedOrigins = this.getAllowedOrigins();
     return {
-      origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+      origin: (origin: string | undefined, cb: (err: Error | null, allow?: boolean) => void) => {
+        if (!origin) {
+          cb(null, true);
+          return;
+        }
+        if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+          cb(null, true);
+        } else {
+          cb(null, false);
+        }
+      },
       credentials: this.getCredentials(),
       methods: this.getAllowedMethods(),
       allowedHeaders: this.getAllowedHeaders(),

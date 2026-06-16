@@ -4,12 +4,19 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppLogger } from './modules/logger/logger.service';
 import { ValidationPipe } from '@nestjs/common';
 import { CorsConfigService } from './modules/cors/cors-config.service';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   const corsConfigService = app.get(CorsConfigService);
   app.enableCors(corsConfigService.getCorsOptions());
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: process.env.NODE_ENV === 'production',
+    }),
+  );
 
   // Configure global validation pipe
   app.useGlobalPipes(
