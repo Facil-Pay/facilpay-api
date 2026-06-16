@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { mkdirSync } from 'node:fs';
 import pino, { Logger } from 'pino';
 import { buildLoggerConfig, buildTransportTargets } from './logger.config';
+import { getCorrelationId } from './correlation.context';
 
 @Injectable()
 export class AppLogger implements LoggerService {
@@ -28,6 +29,10 @@ export class AppLogger implements LoggerService {
           level(label) {
             return { level: label };
           },
+        },
+        mixin() {
+          const correlationId = getCorrelationId();
+          return correlationId ? { correlationId } : {};
         },
       },
       transport,

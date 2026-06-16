@@ -11,6 +11,7 @@ import {
   sanitizeHeaders,
 } from './logging.utils';
 import { Logger } from 'pino';
+import { correlationStore } from './correlation.context';
 
 const DEFAULT_BODY_MAX_LENGTH = 2048;
 
@@ -39,6 +40,16 @@ export class HttpLoggerMiddleware implements NestMiddleware {
     req.requestId = requestId;
     res.setHeader('x-request-id', requestId);
 
+    const incomingCorrelationId = req.headers['x-correlation-id'];
+    const correlationId =
+      (Array.isArray(incomingCorrelationId)
+        ? incomingCorrelationId[0]
+        : incomingCorrelationId) ?? randomUUID();
+    req.correlationId = correlationId;
+    res.setHeader('x-correlation-id', correlationId);
+
+    correlationStore.run({ correlationId }, () => {
+
     const startTime = process.hrtime.bigint();
     let responseBody: unknown;
 
@@ -65,6 +76,7 @@ export class HttpLoggerMiddleware implements NestMiddleware {
 
       const meta: Record<string, unknown> = {
         requestId,
+        correlationId,
         method: req.method,
         path,
         statusCode,
@@ -124,7 +136,8 @@ export class HttpLoggerMiddleware implements NestMiddleware {
       }
     });
 
-    next();
+      next();
+    });
   }
 }
 
