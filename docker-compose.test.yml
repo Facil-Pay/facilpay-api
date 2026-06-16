@@ -1,0 +1,34 @@
+services:
+  api-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    environment:
+      NODE_ENV: test
+      DATABASE_HOST: db-test
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: facilpay_test
+      DATABASE_PASSWORD: facilpay_test
+      DATABASE_NAME: facilpay_test
+      DATABASE_SYNCHRONIZE: "true"
+      JWT_SECRET: test-jwt-secret
+      TWO_FACTOR_ENCRYPTION_KEY: test-2fa-secret
+      LOG_LEVEL: error
+    depends_on:
+      db-test:
+        condition: service_healthy
+    command: npm run test:e2e
+
+  db-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: facilpay_test
+      POSTGRES_PASSWORD: facilpay_test
+      POSTGRES_DB: facilpay_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U facilpay_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 5

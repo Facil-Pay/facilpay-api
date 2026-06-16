@@ -15,24 +15,42 @@ Backend API built with **NestJS**.
 
 ---
 
-## ⚙️ Setup Instructions
+## ⚙️ Quick Start (Docker — recommended)
+
+Prerequisites: Docker + Docker Compose.
+
+```bash
+cp .env.example .env
+docker compose up
+```
+
+The API will be available at `http://localhost:3000`. Hot-reload is enabled — changes to `src/` are picked up immediately.
+
+```bash
+# Run E2E tests against an isolated throwaway database
+make test
+# or
+docker compose -f docker-compose.test.yml run --rm api-test
+```
+
+## ⚙️ Setup (local, without Docker)
 
 1. Install dependencies
 ```bash
 npm install
 ```
 
-## Create environment file
+2. Create environment file
 ```bash
 cp .env.example .env
 ```
 
-## Run the application
+3. Run the application
 ```bash
 npm run start:dev
 ```
- ## The application will be available at:
-http://localhost:3000   
+
+Application available at `http://localhost:3000`.
 
 
 ```md

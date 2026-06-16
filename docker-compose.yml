@@ -1,0 +1,46 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/app/src
+      - ./package.json:/app/package.json
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_HOST: db
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: facilpay
+      DATABASE_PASSWORD: facilpay
+      DATABASE_NAME: facilpay
+      DATABASE_SYNCHRONIZE: "true"
+      JWT_SECRET: dev-jwt-secret-change-in-production
+      TWO_FACTOR_ENCRYPTION_KEY: dev-2fa-secret-change-in-production
+      LOG_LEVEL: debug
+      LOG_PRETTY: "true"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: facilpay
+      POSTGRES_PASSWORD: facilpay
+      POSTGRES_DB: facilpay
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U facilpay"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
