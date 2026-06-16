@@ -337,13 +337,16 @@ export class AuthController {
   @ApiOperation({
     summary: 'Refresh access token',
     description:
-      'Issues a new JWT access token using a valid, non-expired, non-revoked refresh token.',
+      'Token rotation: issues a new JWT access token AND a new refresh token. The presented refresh token is immediately invalidated. Reusing an invalidated token revokes all sessions in the token family.',
   })
   @ApiBody({ type: RefreshTokenDto })
   @ApiOkResponse({
-    description: 'New access token issued.',
+    description: 'New token pair issued. The old refresh token is immediately invalidated.',
     schema: {
-      example: { access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+      example: {
+        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refresh_token: '550e8400-e29b-41d4-a716-446655440000',
+      },
     },
   })
   @ApiUnauthorizedResponse({

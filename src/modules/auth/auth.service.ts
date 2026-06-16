@@ -259,19 +259,38 @@ export class AuthService {
     return { message: 'Email verified successfully. You can now log in.' };
   }
 
-  async refresh(rawToken: string): Promise<{ access_token: string }> {
+  async refresh(rawToken: string): Promise<{ access_token: string; refresh_token: string }> {
     const hashedToken = createHash('sha256').update(rawToken).digest('hex');
     const tokenRecord = await this.refreshTokenRepository.findOne({
       where: { token: hashedToken },
     });
 
-    if (
-      !tokenRecord ||
-      tokenRecord.revoked ||
-      tokenRecord.expiresAt < new Date()
-    ) {
+    if (!tokenRecord) {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
+
+    if (tokenRecord.revoked) {
+      if (tokenRecord.familyId) {
+        await this.refreshTokenRepository.update(
+          { userId: tokenRecord.userId, familyId: tokenRecord.familyId },
+          { revoked: true },
+        );
+        this.logger.warn(
+          { userId: tokenRecord.userId, familyId: tokenRecord.familyId },
+          'Refresh token reuse detected — all sessions in family revoked',
+        );
+      }
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    if (tokenRecord.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    await this.refreshTokenRepository.update(
+      { id: tokenRecord.id },
+      { revoked: true },
+    );
 
     const user = await this.usersService
       .findOne(tokenRecord.userId)
@@ -280,9 +299,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    const payload = { sub: user.id, email: user.email };
-    const access_token = await this.jwtService.signAsync(payload);
-    return { access_token };
+    const familyId = tokenRecord.familyId ?? randomUUID();
+    const payload = { sub: user.id, email: user.email, roles: (user as any).roles };
+    const [access_token, refresh_token] = await Promise.all([
+      this.jwtService.signAsync(payload),
+      this.generateRefreshToken(user.id, familyId),
+    ]);
+
+    return { access_token, refresh_token };
   }
 
   async logout(rawToken: string): Promise<void> {
@@ -303,7 +327,7 @@ export class AuthService {
     return this.sanitizeUser(user as User);
   }
 
-  private async generateRefreshToken(userId: string): Promise<string> {
+  private async generateRefreshToken(userId: string, familyId?: string): Promise<string> {
     const rawToken = randomUUID();
     const hashedToken = createHash('sha256').update(rawToken).digest('hex');
 
@@ -313,6 +337,7 @@ export class AuthService {
     await this.refreshTokenRepository.save({
       token: hashedToken,
       userId,
+      familyId: familyId ?? randomUUID(),
       expiresAt,
       revoked: false,
     });
