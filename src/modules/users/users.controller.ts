@@ -8,6 +8,8 @@ import {
   Delete,
   UseGuards,
   Request,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { PaginationDto } from '../../common/dto/pagination.dto';
@@ -116,6 +118,36 @@ export class UsersController {
   @ApiOperation({ summary: 'List users with pagination and filtering' })
   findAll(@Query() query: PaginationDto): Promise<PaginatedResult<any>> {
     return this.usersService.findAll(query);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Get current user profile',
+    description: 'Returns the authenticated user profile resolved from the JWT sub claim. Sensitive fields (password, twoFactorSecret) are never included.',
+  })
+  @ApiOkResponse({
+    description: 'Authenticated user profile.',
+    schema: {
+      example: {
+        id: 'abc123',
+        email: 'jane.doe@example.com',
+        roles: ['USER'],
+        isEmailVerified: true,
+        isActive: true,
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T10:00:00.000Z',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid access token.',
+    schema: { example: { statusCode: 401, message: 'Unauthorized' } },
+  })
+  @HttpCode(HttpStatus.OK)
+  async getMe(@Request() req: any) {
+    return this.usersService.findOne(req.user.id);
   }
 
   @UseGuards(JwtAuthGuard)
