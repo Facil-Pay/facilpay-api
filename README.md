@@ -57,26 +57,42 @@ Body:
 
 ## 🔐 Authentication
 
-The API includes a JWT-based authentication system with the following endpoints:
+The API uses JWT bearer tokens. Swagger UI is available at `http://localhost:3000/api/docs` with built-in token authorization.
+
+### How to authenticate in Swagger
+
+1. Call `POST /v1/auth/login` with your credentials to receive an `access_token`
+2. Click the **Authorize** button (🔓) in the top-right of Swagger UI
+3. Paste the token in the `bearer` field and click **Authorize**
+4. All protected endpoints will now include the `Authorization: Bearer <token>` header automatically
+5. The token persists across page refreshes (`persistAuthorization: true`)
 
 ### Register a new user
 ```bash
-curl -X POST http://localhost:3000/auth/register \
+curl -X POST http://localhost:3000/v1/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password123"}'
+  -d '{"email":"user@example.com","password":"P@ssw0rd!"}'
 ```
 
-### Login user
+### Login and obtain token
 ```bash
-curl -X POST http://localhost:3000/auth/login \
+curl -X POST http://localhost:3000/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password123"}'
+  -d '{"email":"user@example.com","password":"P@ssw0rd!"}'
+# Response includes: access_token, refresh_token, user
 ```
 
 ### Access protected route
 ```bash
-curl -X GET http://localhost:3000/profile \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+curl -X GET http://localhost:3000/v1/users/me \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Refresh access token
+```bash
+curl -X POST http://localhost:3000/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"YOUR_REFRESH_TOKEN"}'
 ```
 
 ## 📁 Project Structure

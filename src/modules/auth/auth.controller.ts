@@ -51,8 +51,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private usersService: UsersService,
-  ) { }
-  constructor(private authService: AuthService) {}
+  ) {}
 
   @AuthThrottle()
   @Post('register')
@@ -446,10 +445,11 @@ export class AuthController {
     return this.authService.resetPassword(dto);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Post('unlock/:userId')
   @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Unlock account (Admin only)',
     description:
