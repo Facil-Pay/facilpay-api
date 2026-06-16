@@ -11,10 +11,16 @@ import { IdempotencyService } from './idempotency.service';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 import { CurrencyConfigService } from './currency-config.service';
 import { CurrenciesController } from './currencies.controller';
+import { SettlementService } from './settlement.service';
+import { StellarSettlement } from './entities/stellar-settlement.entity';
+import { StellarModule } from '../stellar/stellar.module';
 
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Payment, Refund, IdempotencyKey])],
+  imports: [
+    TypeOrmModule.forFeature([Payment, Refund, IdempotencyKey, StellarSettlement]),
+    StellarModule,
+  ],
   controllers: [PaymentsController, CurrenciesController],
 
   providers: [
@@ -24,7 +30,8 @@ import { CurrenciesController } from './currencies.controller';
     IdempotencyService,
     IdempotencyInterceptor,
     CurrencyConfigService,
+    SettlementService,
   ],
-  exports: [PaymentsService, WebhookSignatureService, WebhookGuard],
+  exports: [PaymentsService, WebhookSignatureService, WebhookGuard, SettlementService],
 })
 export class PaymentsModule { }

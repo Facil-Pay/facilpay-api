@@ -10,6 +10,7 @@ import {
   UseGuards,
   UseInterceptors,
   BadRequestException,
+  NotFoundException,
   Headers,
 } from '@nestjs/common';
 import {
@@ -30,6 +31,8 @@ import {
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { PaymentsService } from './payments.service';
+import { SettlementService } from './settlement.service';
+import { SettlePaymentDto } from './dto/settle-payment.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-response.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
@@ -44,7 +47,10 @@ import { IdempotencyInterceptor } from './idempotency.interceptor';
 @ApiTags('payments')
 @Controller('v1/payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) { }
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly settlementService: SettlementService,
+  ) {}
 
   @Post()
   @UseInterceptors(IdempotencyInterceptor)
@@ -454,5 +460,52 @@ export class PaymentsController {
   })
   cancel(@Param('id') id: string) {
     return this.paymentsService.cancel(id);
+  }
+
+  @Post(':id/settle')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Settle a payment on the Stellar network',
+    description:
+      'Submits a Stellar XLM payment for a COMPLETED facilpay payment. Idempotent — re-submitting a CONFIRMED settlement returns 409. A failed settlement can be retried.',
+  })
+  @ApiParam({ name: 'id', description: 'Payment UUID to settle' })
+  @ApiBody({ type: SettlePaymentDto })
+  @ApiOkResponse({
+    description: 'Settlement submitted and confirmed on Stellar.',
+    schema: {
+      example: {
+        id: 'abc123',
+        paymentId: '123e4567-e89b-12d3-a456-426614174000',
+        destinationAddress: 'GAHJJJKMOKYE4RVPZEWZTKH5FVI4PA3VL7GK2LFNUBSGBV3BHVJOVST',
+        xlmAmount: '10.5000000',
+        status: 'CONFIRMED',
+        transactionHash: 'abc123def456...',
+        ledger: 52345678,
+        createdAt: '2026-01-26T11:00:00.000Z',
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  @ApiResponse({ status: 409, description: 'Already settled or in progress.' })
+  @ApiInternalServerErrorResponse({ description: 'Stellar transaction failed.' })
+  settle(@Param('id') id: string, @Body() dto: SettlePaymentDto) {
+    return this.settlementService.settle(id, dto);
+  }
+
+  @Get(':id/settlement')
+  @ApiOperation({
+    summary: 'Get Stellar settlement details for a payment',
+    description: 'Returns the Stellar settlement record for this payment, including transaction hash and status.',
+  })
+  @ApiParam({ name: 'id', description: 'Payment UUID' })
+  @ApiOkResponse({ description: 'Settlement record.' })
+  @ApiNotFoundResponse({ description: 'No settlement found for this payment.' })
+  async getSettlement(@Param('id') id: string) {
+    const settlement = await this.settlementService.getSettlement(id);
+    if (!settlement) {
+      throw new NotFoundException(`No settlement found for payment ${id}`);
+    }
+    return settlement;
   }
 }
