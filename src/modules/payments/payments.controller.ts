@@ -30,6 +30,8 @@ import {
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { PaymentsService } from './payments.service';
+import { ReconciliationService } from './reconciliation.service';
+import { ReconciliationQueryDto } from './dto/reconciliation-query.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-response.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
@@ -44,7 +46,10 @@ import { IdempotencyInterceptor } from './idempotency.interceptor';
 @ApiTags('payments')
 @Controller('v1/payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) { }
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly reconciliationService: ReconciliationService,
+  ) {}
 
   @Post()
   @UseInterceptors(IdempotencyInterceptor)
@@ -202,6 +207,38 @@ export class PaymentsController {
     }
 
     return this.paymentsService.findAll(getPaymentsDto);
+  }
+
+  @Get('reconciliation')
+  @ApiOperation({
+    summary: 'Generate payment reconciliation report',
+    description:
+      'Returns a breakdown of payment counts and amounts by status, plus refund totals, for a given time window and optional currency filter.',
+  })
+  @ApiOkResponse({
+    description: 'Reconciliation report generated.',
+    schema: {
+      example: {
+        period: { from: '2026-01-01T00:00:00Z', to: '2026-01-31T23:59:59Z' },
+        currency: 'USD',
+        generatedAt: '2026-02-01T00:00:00.000Z',
+        summary: {
+          totalPayments: 150,
+          totalAmount: 15000.0,
+          totalRefundedAmount: 500.0,
+          netAmount: 14500.0,
+        },
+        byStatus: [
+          { status: 'COMPLETED', count: 120, totalAmount: 12000.0 },
+          { status: 'PENDING', count: 20, totalAmount: 2000.0 },
+          { status: 'FAILED', count: 10, totalAmount: 1000.0 },
+        ],
+        refunds: { count: 5, totalAmount: 500.0 },
+      },
+    },
+  })
+  getReconciliation(@Query() query: ReconciliationQueryDto) {
+    return this.reconciliationService.generate(query);
   }
 
   @Get(':id')

@@ -11,6 +11,7 @@ import { IdempotencyService } from './idempotency.service';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 import { CurrencyConfigService } from './currency-config.service';
 import { CurrenciesController } from './currencies.controller';
+import { ReconciliationService } from './reconciliation.service';
 
 
 @Module({
@@ -24,7 +25,8 @@ import { CurrenciesController } from './currencies.controller';
     IdempotencyService,
     IdempotencyInterceptor,
     CurrencyConfigService,
+    ReconciliationService,
   ],
-  exports: [PaymentsService, WebhookSignatureService, WebhookGuard],
+  exports: [PaymentsService, WebhookSignatureService, WebhookGuard, ReconciliationService],
 })
 export class PaymentsModule { }
