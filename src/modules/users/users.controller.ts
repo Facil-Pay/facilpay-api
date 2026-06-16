@@ -15,6 +15,7 @@ import { PaginatedResult } from '../../common/interfaces';
 import { Query } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -22,6 +23,7 @@ import { UserRole } from '../../common/constants/roles';
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiForbiddenResponse,
   ApiNoContentResponse,
@@ -143,6 +145,42 @@ export class UsersController {
   })
   findOne(@Param('id') id: string) {
     return this.usersService.findOne(id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Update current user profile',
+    description: 'Updates the authenticated user\'s name and/or email. Email change triggers re-verification and resets isEmailVerified to false.',
+  })
+  @ApiBody({ type: UpdateProfileDto })
+  @ApiOkResponse({
+    description: 'Profile updated.',
+    schema: {
+      example: {
+        user: {
+          id: 'abc123',
+          email: 'jane.new@example.com',
+          name: 'Jane Doe',
+          isEmailVerified: false,
+          createdAt: '2026-01-26T10:00:00.000Z',
+          updatedAt: '2026-01-26T12:00:00.000Z',
+        },
+        emailChanged: true,
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'Email address already in use.',
+    schema: { example: { statusCode: 409, message: 'Email address is already in use' } },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid access token.',
+    schema: { example: { statusCode: 401, message: 'Unauthorized' } },
+  })
+  async updateMe(@Request() req: any, @Body() dto: UpdateProfileDto) {
+    return this.usersService.updateMe(req.user.id, dto);
   }
 
   @UseGuards(JwtAuthGuard)

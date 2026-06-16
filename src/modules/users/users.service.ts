@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserRole } from '../../common/constants/roles';
 import * as bcrypt from 'bcrypt';
 import { AppLogger } from '../logger/logger.service';
@@ -94,6 +95,41 @@ export class UsersService {
     return await this.userRepository.findOne({
       where: { email, deletedAt: null },
     });
+  }
+
+  async updateMe(
+    id: string,
+    dto: UpdateProfileDto,
+  ): Promise<{ user: Omit<User, 'password' | 'twoFactorSecret'>; emailChanged: boolean }> {
+    const user = await this.userRepository.findOne({ where: { id, deletedAt: null } });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    let emailChanged = false;
+
+    if (dto.email && dto.email !== user.email) {
+      const existing = await this.userRepository.findOne({
+        where: { email: dto.email, deletedAt: null },
+      });
+      if (existing) {
+        throw new ConflictException('Email address is already in use');
+      }
+      user.email = dto.email;
+      user.isEmailVerified = false;
+      emailChanged = true;
+    }
+
+    if (dto.name !== undefined) {
+      user.name = dto.name;
+    }
+
+    user.updatedAt = new Date();
+    const saved = await this.userRepository.save(user);
+    const { password, twoFactorSecret, ...result } = saved;
+
+    this.logger.info({ userId: id, emailChanged }, 'User profile updated');
+    return { user: result, emailChanged };
   }
 
   async findByIdWithSecrets(id: string): Promise<User> {
