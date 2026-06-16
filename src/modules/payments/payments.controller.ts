@@ -11,7 +11,9 @@ import {
   UseInterceptors,
   BadRequestException,
   Headers,
+  Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import {
   ApiTags,
   ApiOperation,
@@ -30,6 +32,7 @@ import {
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { PaymentsService } from './payments.service';
+import { ExportService, ExportFormat } from './export.service';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-response.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
@@ -44,7 +47,10 @@ import { IdempotencyInterceptor } from './idempotency.interceptor';
 @ApiTags('payments')
 @Controller('v1/payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) { }
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly exportService: ExportService,
+  ) {}
 
   @Post()
   @UseInterceptors(IdempotencyInterceptor)
@@ -202,6 +208,29 @@ export class PaymentsController {
     }
 
     return this.paymentsService.findAll(getPaymentsDto);
+  }
+
+  @Get('export')
+  @ApiOperation({
+    summary: 'Export payments to CSV or PDF',
+    description:
+      'Downloads all payments matching the given filters as a CSV or PDF file. Supports the same filter parameters as GET /v1/payments.',
+  })
+  @ApiOkResponse({ description: 'File download.' })
+  @ApiBadRequestResponse({ description: "Invalid format — must be 'csv' or 'pdf'." })
+  async exportPayments(
+    @Query('format') format: string,
+    @Query() filters: GetPaymentsDto,
+    @Res() res: Response,
+  ) {
+    const { data, contentType, filename } =
+      await this.exportService.exportPayments(
+        (format ?? 'csv') as ExportFormat,
+        filters,
+      );
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(data);
   }
 
   @Get(':id')
