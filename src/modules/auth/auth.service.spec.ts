@@ -5,6 +5,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UnauthorizedException } from '@nestjs/common';
 import { AppLogger } from '../logger/logger.service';
+import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 
 jest.mock('bcrypt');
@@ -51,6 +52,16 @@ describe('AuthService', () => {
     }),
   };
 
+  const mockManager = {
+    findOne: jest.fn(),
+    update: jest.fn(),
+    getRepository: jest.fn(() => ({ save: jest.fn().mockResolvedValue({}) })),
+  };
+
+  const mockDataSource = {
+    transaction: jest.fn((cb) => cb(mockManager)),
+  };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -74,6 +85,10 @@ describe('AuthService', () => {
         {
           provide: require('./mail/mail.service').MailService,
           useValue: mockMailService,
+        },
+        {
+          provide: DataSource,
+          useValue: mockDataSource,
         },
         {
           provide: 'RefreshTokenRepository',
@@ -269,6 +284,98 @@ describe('AuthService', () => {
 
       expect(usersService.findOne).toHaveBeenCalledWith(userId);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('refresh', () => {
+    const user = {
+      id: 'user-id-123',
+      email: 'test@example.com',
+      roles: ['USER'],
+    };
+
+    const validTokenRecord = {
+      id: 'token-row-id',
+      userId: user.id,
+      token: expect.any(String),
+      revoked: false,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    };
+
+    beforeEach(() => {
+      mockManager.findOne.mockReset();
+      mockManager.update.mockReset();
+      mockManager.getRepository.mockReset();
+      mockManager.getRepository.mockReturnValue({
+        save: jest.fn().mockResolvedValue({}),
+      });
+      mockJwtService.signAsync.mockResolvedValue('new-access-token');
+      mockUsersService.findOne.mockResolvedValue(user);
+    });
+
+    it('should rotate tokens on a valid refresh call', async () => {
+      mockManager.findOne.mockResolvedValue(validTokenRecord);
+      mockManager.update.mockResolvedValue(undefined);
+
+      const result = await service.refresh('raw-valid-token');
+
+      expect(result).toEqual({
+        access_token: 'new-access-token',
+        refresh_token: expect.any(String),
+      });
+
+      expect(mockManager.update).toHaveBeenCalledWith(
+        expect.anything(),
+        { id: validTokenRecord.id },
+        { revoked: true },
+      );
+    });
+
+    it('should return 401 for an expired refresh token', async () => {
+      mockManager.findOne.mockResolvedValue({
+        ...validTokenRecord,
+        expiresAt: new Date(Date.now() - 1000),
+      });
+
+      await expect(service.refresh('raw-expired-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should return 401 for a non-existent refresh token', async () => {
+      mockManager.findOne.mockResolvedValue(null);
+
+      await expect(service.refresh('raw-unknown-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('should revoke all user sessions and return 401 on reuse of invalidated token', async () => {
+      const revokedTokenRecord = {
+        ...validTokenRecord,
+        revoked: true,
+      };
+      mockManager.findOne.mockResolvedValue(revokedTokenRecord);
+      mockManager.update.mockResolvedValue(undefined);
+
+      await expect(service.refresh('raw-reused-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
+
+      expect(mockManager.update).toHaveBeenCalledWith(
+        expect.anything(),
+        { userId: user.id },
+        { revoked: true },
+      );
+    });
+
+    it('should return 401 when the user no longer exists', async () => {
+      mockManager.findOne.mockResolvedValue(validTokenRecord);
+      mockUsersService.findOne.mockRejectedValue(new Error('Not found'));
+
+      await expect(service.refresh('raw-valid-token')).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
   });
 });

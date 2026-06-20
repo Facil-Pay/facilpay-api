@@ -335,19 +335,24 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Refresh access token',
+    summary: 'Refresh token pair',
     description:
-      'Issues a new JWT access token using a valid, non-expired, non-revoked refresh token.',
+      'Issues a new access token and a new refresh token. The presented refresh token is immediately invalidated (token rotation). ' +
+      'Reusing an already-invalidated refresh token returns 401 and revokes all active sessions for that user.',
   })
   @ApiBody({ type: RefreshTokenDto })
   @ApiOkResponse({
-    description: 'New access token issued.',
+    description: 'New token pair issued. Old refresh token is invalidated.',
     schema: {
-      example: { access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+      example: {
+        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refresh_token: '550e8400-e29b-41d4-a716-446655440000',
+      },
     },
   })
   @ApiUnauthorizedResponse({
-    description: 'Invalid, expired, or revoked refresh token.',
+    description:
+      'Invalid, expired, or already-used refresh token. If the token was previously rotated, all sessions for that user are revoked.',
     schema: {
       example: {
         statusCode: 401,

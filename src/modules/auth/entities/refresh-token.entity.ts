@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 
 @Entity('refresh_tokens')
@@ -10,6 +11,7 @@ export class RefreshToken {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Index('IDX_refresh_tokens_token')
   @Column({ unique: true })
   token: string;
 

@@ -8,9 +8,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
   createCipheriv,
   createDecipheriv,
@@ -45,6 +44,7 @@ export class AuthService {
     private jwtService: JwtService,
     private mailService: MailService,
     private configService: ConfigService,
+    private dataSource: DataSource,
     @InjectRepository(RefreshToken)
     private refreshTokenRepository: Repository<RefreshToken>,
     @InjectRepository(PasswordResetToken)
@@ -259,30 +259,51 @@ export class AuthService {
     return { message: 'Email verified successfully. You can now log in.' };
   }
 
-  async refresh(rawToken: string): Promise<{ access_token: string }> {
+  async refresh(
+    rawToken: string,
+  ): Promise<{ access_token: string; refresh_token: string }> {
     const hashedToken = createHash('sha256').update(rawToken).digest('hex');
-    const tokenRecord = await this.refreshTokenRepository.findOne({
-      where: { token: hashedToken },
+
+    return this.dataSource.transaction(async (manager) => {
+      const tokenRecord = await manager.findOne(RefreshToken, {
+        where: { token: hashedToken },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+
+      if (tokenRecord.revoked) {
+        await manager.update(
+          RefreshToken,
+          { userId: tokenRecord.userId },
+          { revoked: true },
+        );
+        this.logger.warn(
+          { userId: tokenRecord.userId },
+          'Refresh token reuse detected — all sessions revoked',
+        );
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+
+      const user = await this.usersService
+        .findOne(tokenRecord.userId)
+        .catch(() => null);
+      if (!user) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+
+      await manager.update(RefreshToken, { id: tokenRecord.id }, { revoked: true });
+
+      const payload = { sub: user.id, email: user.email, roles: user.roles };
+      const [access_token, refresh_token] = await Promise.all([
+        this.jwtService.signAsync(payload),
+        this.generateRefreshToken(user.id, manager),
+      ]);
+
+      return { access_token, refresh_token };
     });
-
-    if (
-      !tokenRecord ||
-      tokenRecord.revoked ||
-      tokenRecord.expiresAt < new Date()
-    ) {
-      throw new UnauthorizedException('Invalid or expired refresh token');
-    }
-
-    const user = await this.usersService
-      .findOne(tokenRecord.userId)
-      .catch(() => null);
-    if (!user) {
-      throw new UnauthorizedException('Invalid or expired refresh token');
-    }
-
-    const payload = { sub: user.id, email: user.email };
-    const access_token = await this.jwtService.signAsync(payload);
-    return { access_token };
   }
 
   async logout(rawToken: string): Promise<void> {
@@ -303,19 +324,21 @@ export class AuthService {
     return this.sanitizeUser(user as User);
   }
 
-  private async generateRefreshToken(userId: string): Promise<string> {
+  private async generateRefreshToken(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<string> {
     const rawToken = randomUUID();
     const hashedToken = createHash('sha256').update(rawToken).digest('hex');
 
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    await this.refreshTokenRepository.save({
-      token: hashedToken,
-      userId,
-      expiresAt,
-      revoked: false,
-    });
+    const repo = manager
+      ? manager.getRepository(RefreshToken)
+      : this.refreshTokenRepository;
+
+    await repo.save({ token: hashedToken, userId, expiresAt, revoked: false });
 
     return rawToken;
   }
