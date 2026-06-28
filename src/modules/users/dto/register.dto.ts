@@ -21,17 +21,17 @@ export class RegisterDto {
 
   @IsString()
   @IsNotEmpty({ message: 'Password is required' })
-  @MinLength(6, { message: 'Password must be at least 6 characters long' })
+  @MinLength(10, { message: 'Password must be at least 10 characters long' })
   @MaxLength(128, { message: 'Password must not exceed 128 characters' })
-  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/, {
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^a-zA-Z0-9])/, {
     message:
-      'Password must contain at least one uppercase letter, one lowercase letter, and one number',
+      'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
   })
   @ApiProperty({
     description:
-      'Password for the new user (minimum 6 characters, must contain uppercase, lowercase, and number).',
-    example: 'P@ssw0rd!',
-    minLength: 6,
+      'Password for the new user (minimum 10 characters, must contain uppercase, lowercase, number, and special character).',
+    example: 'P@ssw0rd!23',
+    minLength: 10,
     maxLength: 128,
   })
   password: string;

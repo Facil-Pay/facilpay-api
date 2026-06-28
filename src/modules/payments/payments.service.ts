@@ -313,6 +313,39 @@ export class PaymentsService {
     }
   }
 
+  async findForExport(dto: GetPaymentsDto): Promise<Payment[]> {
+    const query = this.paymentRepository.createQueryBuilder('payment');
+
+    if (dto.status) {
+      query.andWhere('payment.status = :status', { status: dto.status });
+    }
+    if (dto.currency) {
+      query.andWhere('payment.currency = :currency', { currency: dto.currency });
+    }
+    if (dto.minAmount !== undefined) {
+      query.andWhere('payment.amount >= :minAmount', { minAmount: dto.minAmount });
+    }
+    if (dto.maxAmount !== undefined) {
+      query.andWhere('payment.amount <= :maxAmount', { maxAmount: dto.maxAmount });
+    }
+    if (dto.from) {
+      query.andWhere('payment.createdAt >= :fromDate', { fromDate: dto.from });
+    }
+    if (dto.to) {
+      query.andWhere('payment.createdAt <= :toDate', { toDate: dto.to });
+    }
+    if (dto.search) {
+      const searchTerm = `%${dto.search}%`;
+      query.andWhere(
+        '(payment.description ILIKE :search OR payment.externalReference ILIKE :search)',
+        { search: searchTerm },
+      );
+    }
+
+    query.orderBy('payment.createdAt', 'DESC').take(10000);
+    return query.getMany();
+  }
+
   /**
    * Cancel a payment
    * Only PENDING payments can be cancelled

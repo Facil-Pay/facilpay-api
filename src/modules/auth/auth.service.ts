@@ -31,6 +31,7 @@ import { Logger } from 'pino';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { MailService } from './mail/mail.service';
+import { PasswordStrengthService } from './password-strength.service';
 
 @Injectable()
 export class AuthService {
@@ -45,6 +46,7 @@ export class AuthService {
     private mailService: MailService,
     private configService: ConfigService,
     private dataSource: DataSource,
+    private passwordStrengthService: PasswordStrengthService,
     @InjectRepository(RefreshToken)
     private refreshTokenRepository: Repository<RefreshToken>,
     @InjectRepository(PasswordResetToken)
@@ -58,11 +60,13 @@ export class AuthService {
 
   async register(
     registerDto: RegisterDto,
-  ): Promise<{ message: string; user: Omit<User, 'password'> }> {
+  ): Promise<{ message: string; user: Omit<User, 'password'>; passwordStrength: { score: number } }> {
     const existingUser = await this.usersService.findByEmail(registerDto.email);
     if (existingUser) {
       throw new UnauthorizedException('User already exists');
     }
+
+    const { score } = await this.passwordStrengthService.validateAndScore(registerDto.password);
 
     const user = await this.usersService.create(registerDto);
     this.logger.info({ userId: user.id, email: user.email }, 'User registered');
@@ -88,6 +92,7 @@ export class AuthService {
       message:
         'User registered successfully. Please check your email to verify your account.',
       user,
+      passwordStrength: { score },
     };
   }
 
@@ -534,6 +539,8 @@ export class AuthService {
     if (!user || user.email !== resetPasswordDto.email) {
       throw new BadRequestException('Invalid or expired password reset token');
     }
+
+    await this.passwordStrengthService.validateAndScore(resetPasswordDto.newPassword);
 
     const hashedPassword = await bcrypt.hash(resetPasswordDto.newPassword, 10);
     await this.usersService.updatePassword(user.id, hashedPassword);

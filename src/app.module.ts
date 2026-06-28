@@ -15,6 +15,7 @@ import { HttpLoggerMiddleware } from './modules/logger/http-logger.middleware';
 import { ThrottlerConfigModule } from './modules/throttler/throttler.config.module';
 import { StellarModule } from './modules/stellar/stellar.module';
 import { CorsModule } from './modules/cors/cors.module';
+import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { CorsModule } from './modules/cors/cors.module';
     SettlementsModule,
     WebhooksModule,
     StellarModule,
+    ApiKeysModule,
   ],
   controllers: [AppController],
   providers: [AppService],

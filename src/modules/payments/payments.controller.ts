@@ -12,6 +12,7 @@ import {
   BadRequestException,
   Sse,
   MessageEvent,
+  Res,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { SseJwtGuard } from '../auth/guards/sse-jwt.guard';
@@ -42,6 +43,11 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/roles';
 import { ExportPaymentsDto } from './dto/export-payments.dto';
 import type { Response } from 'express';
+import {
+  createPaymentsPdfDocument,
+  paymentToCsvRow,
+  writePaymentsPdfTable,
+} from './export/payments-exporter';
 
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-response.dto';
@@ -186,6 +192,52 @@ export class PaymentsController {
     }
 
     return this.paymentsService.createBulk(paymentInstances);
+  }
+
+  @Get('export')
+  @ApiBearerAuth('bearer')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Export payments as CSV or PDF',
+    description:
+      'Exports filtered payments as a downloadable CSV or PDF file. Supports the same date range and status filters as the list endpoint.',
+  })
+  @ApiQuery({ name: 'format', enum: ['csv', 'pdf'], required: true, example: 'csv' })
+  @ApiQuery({ name: 'from', required: false, example: '2026-01-01T00:00:00Z' })
+  @ApiQuery({ name: 'to', required: false, example: '2026-12-31T23:59:59Z' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by status' })
+  @ApiOkResponse({ description: 'Downloadable CSV or PDF file.' })
+  @ApiBadRequestResponse({ description: 'Invalid format or date range.' })
+  async exportPayments(
+    @Query() exportDto: ExportPaymentsDto,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (exportDto.from && exportDto.to) {
+      if (new Date(exportDto.from).getTime() > new Date(exportDto.to).getTime()) {
+        throw new BadRequestException('from date must not be greater than to date');
+      }
+    }
+
+    const payments = await this.paymentsService.findForExport(exportDto);
+
+    if (exportDto.format === 'csv') {
+      const csvHeader = 'id,amount,currency,status,externalReference,description,refundedAmount,cancelledAt,createdAt,updatedAt';
+      const rows = payments.map(paymentToCsvRow);
+      const csv = [csvHeader, ...rows].join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="payments.csv"');
+      res.send(csv);
+      return;
+    }
+
+    const doc = createPaymentsPdfDocument();
+    writePaymentsPdfTable(doc, payments);
+    doc.end();
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="payments.pdf"');
+    doc.pipe(res);
   }
 
   @Get()
