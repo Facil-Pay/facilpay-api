@@ -32,7 +32,14 @@ export class User {
 
   @Column({ nullable: true })
   twoFactorSecret: string | null = null;
+  
+  @Column({ default: false })
   twoFactorEnabled: boolean = false;
+  
+  @Column('text', { array: true, nullable: true })
+  backupCodes: string[] | null = null;
+
+  @Column({ type: 'timestamp', nullable: true })
   deletedAt: Date | null = null;
 
   @Column({ default: 0 })
@@ -63,6 +70,9 @@ export class User {
     }
     if (this.twoFactorEnabled === undefined) {
       this.twoFactorEnabled = false;
+    }
+    if (this.backupCodes === undefined) {
+      this.backupCodes = null;
     }
     if (this.deletedAt === undefined) {
       this.deletedAt = null;

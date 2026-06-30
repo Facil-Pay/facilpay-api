@@ -31,10 +31,10 @@ export class LoginDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{6}$/, { message: 'Two-factor code must be 6 digits' })
+  @Matches(/^(\d{6}|[a-zA-Z0-9]{8,10})$/, { message: 'Two-factor code must be 6 digits or a valid backup code' })
   @ApiPropertyOptional({
     description:
-      'Six-digit authenticator app code. Required when 2FA is enabled.',
+      'Six-digit authenticator app code or backup code. Required when 2FA is enabled.',
     example: '123456',
   })
   twoFactorCode?: string;
