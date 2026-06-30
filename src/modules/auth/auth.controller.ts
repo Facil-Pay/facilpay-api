@@ -20,6 +20,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailQueryDto } from './dto/verify-email-query.dto';
 import { TwoFactorCodeDto } from './dto/two-factor-code.dto';
+import { DisableTwoFactorDto } from './dto/disable-two-factor.dto';
 import { AuthThrottle } from '../throttler/throttler.decorator';
 import { Public } from './decorators/public.decorator';
 import { RolesGuard } from './roles.guard';
@@ -266,9 +267,9 @@ export class AuthController {
   @ApiOperation({
     summary: 'Disable two-factor authentication',
     description:
-      'Requires the current TOTP code and then removes the stored encrypted secret.',
+      'Requires password confirmation and then removes the stored encrypted secret and disables 2FA.',
   })
-  @ApiBody({ type: TwoFactorCodeDto })
+  @ApiBody({ type: DisableTwoFactorDto })
   @ApiOkResponse({
     description: 'Two-factor authentication disabled.',
     schema: {
@@ -279,11 +280,11 @@ export class AuthController {
     },
   })
   @ApiUnauthorizedResponse({
-    description: 'Invalid TOTP code.',
+    description: 'Invalid password.',
     schema: {
       example: {
         statusCode: 401,
-        message: 'Invalid two-factor code',
+        message: 'Invalid password',
         error: 'Unauthorized',
       },
     },
@@ -293,7 +294,7 @@ export class AuthController {
   })
   async disableTwoFactor(
     @CurrentUser() user: User,
-    @Body() dto: TwoFactorCodeDto,
+    @Body() dto: DisableTwoFactorDto,
   ) {
     return this.authService.disableTwoFactor(user.id, dto);
   }

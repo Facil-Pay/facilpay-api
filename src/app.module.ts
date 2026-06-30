@@ -14,12 +14,22 @@ import { LoggerModule } from './modules/logger/logger.module';
 import { HttpLoggerMiddleware } from './modules/logger/http-logger.middleware';
 import { ThrottlerConfigModule } from './modules/throttler/throttler.config.module';
 import { StellarModule } from './modules/stellar/stellar.module';
+import { BullModule } from '@nestjs/bullmq';
 import { CorsModule } from './modules/cors/cors.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: {
+          host: config.get('REDIS_HOST', 'localhost'),
+          port: config.get('REDIS_PORT', 6379),
+        },
+      }),
+    }),
     ThrottlerConfigModule,
     LoggerModule,
     CorsModule,

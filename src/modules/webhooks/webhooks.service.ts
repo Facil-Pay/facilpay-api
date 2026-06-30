@@ -5,14 +5,15 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
-import { randomBytes, createHmac } from 'crypto';
+import { randomBytes } from 'crypto';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
+import { WebhookDelivery, WebhookDeliveryStatus } from './entities/webhook-delivery.entity';
 import { CreateWebhookEndpointDto } from './dto/create-webhook-endpoint.dto';
 import { UpdateWebhookEndpointDto } from './dto/update-webhook-endpoint.dto';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 
 @Injectable()
 export class WebhooksService {
@@ -21,7 +22,9 @@ export class WebhooksService {
   constructor(
     @InjectRepository(WebhookEndpoint)
     private readonly repo: Repository<WebhookEndpoint>,
-    private readonly httpService: HttpService,
+    @InjectRepository(WebhookDelivery)
+    private readonly deliveryRepo: Repository<WebhookDelivery>,
+    @InjectQueue('webhooks') private readonly webhooksQueue: Queue,
     appLogger: AppLogger,
   ) {
     this.logger = appLogger.child({ module: WebhooksService.name });
@@ -72,39 +75,85 @@ export class WebhooksService {
       },
     };
 
-    const body = JSON.stringify(payload);
-    const signature = createHmac('sha256', endpoint.secret)
-      .update(body)
-      .digest('hex');
+    await this.dispatchEventToEndpoint(endpoint, payload);
 
-    try {
-      const response = await firstValueFrom(
-        this.httpService.post(endpoint.url, payload, {
-          timeout: 10_000,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-FacilPay-Signature': signature,
-            'X-FacilPay-Event': 'test',
-          },
-        }),
-      );
+    return { delivered: false, statusCode: null, error: 'Queued for delivery' };
+  }
 
-      this.logger.info(
-        { endpointId: id, statusCode: response.status },
-        'Test webhook delivered successfully',
-      );
-      return { delivered: true, statusCode: response.status, error: null };
-    } catch (error: unknown) {
-      const axiosError = error as { response?: { status?: number }; message?: string };
-      const statusCode = axiosError?.response?.status ?? null;
-      const errorMsg = error instanceof Error ? error.message : String(error);
+  async dispatchEventToMerchant(merchantId: string, event: string, data: any): Promise<void> {
+    const endpoints = await this.repo.find({ where: { merchantId } });
+    const payload = {
+      event,
+      timestamp: new Date().toISOString(),
+      data,
+    };
 
-      this.logger.warn(
-        { endpointId: id, statusCode, error: errorMsg },
-        'Test webhook delivery failed',
-      );
-      return { delivered: false, statusCode, error: errorMsg };
+    for (const endpoint of endpoints) {
+      // Check if endpoint is enabled or filtered by event (assuming all are sent if no filter)
+      await this.dispatchEventToEndpoint(endpoint, payload);
     }
+  }
+
+  async dispatchEventToEndpoint(endpoint: WebhookEndpoint, payload: any): Promise<void> {
+    const delivery = this.deliveryRepo.create({
+      endpointId: endpoint.id,
+      payload,
+      status: WebhookDeliveryStatus.PENDING,
+    });
+    
+    const savedDelivery = await this.deliveryRepo.save(delivery);
+
+    await this.webhooksQueue.add(
+      'deliver',
+      {
+        deliveryId: savedDelivery.id,
+        endpointId: endpoint.id,
+        payload,
+      },
+      {
+        attempts: 6, // 1 initial + 5 retries
+        backoff: {
+          type: 'exponential',
+          delay: 1000,
+        },
+        removeOnComplete: true, // we store the state in the DB
+        removeOnFail: false,
+      }
+    );
+  }
+
+  async retryFailedDelivery(deliveryId: string): Promise<void> {
+    const delivery = await this.deliveryRepo.findOne({ where: { id: deliveryId } });
+    if (!delivery) {
+      throw new NotFoundException(`Webhook delivery ${deliveryId} not found`);
+    }
+
+    if (delivery.status !== WebhookDeliveryStatus.FAILED && delivery.status !== WebhookDeliveryStatus.DEAD_LETTER) {
+      throw new ForbiddenException(`Only failed or dead-letter deliveries can be retried`);
+    }
+
+    delivery.status = WebhookDeliveryStatus.PENDING;
+    await this.deliveryRepo.save(delivery);
+
+    await this.webhooksQueue.add(
+      'deliver',
+      {
+        deliveryId: delivery.id,
+        endpointId: delivery.endpointId,
+        payload: delivery.payload,
+      },
+      {
+        attempts: 6,
+        backoff: {
+          type: 'exponential',
+          delay: 1000,
+        },
+        removeOnComplete: true,
+        removeOnFail: false,
+      }
+    );
+    
+    this.logger.info({ deliveryId }, 'Webhook delivery scheduled for manual retry');
   }
 
   private async findOwned(id: string, merchantId: string): Promise<WebhookEndpoint> {

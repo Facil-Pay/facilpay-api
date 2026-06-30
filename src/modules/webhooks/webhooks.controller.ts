@@ -245,4 +245,24 @@ export class WebhooksController {
   ): Promise<{ delivered: boolean; statusCode: number | null; error: string | null }> {
     return this.webhooksService.sendTest(id, user.id);
   }
+
+  @Post('deliveries/:deliveryId/retry')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Manually retry a failed webhook delivery',
+    description: 'Enqueues a failed or dead-lettered webhook delivery for manual retry.',
+  })
+  @ApiParam({ name: 'deliveryId', description: 'Webhook delivery UUID', example: '123e4567-e89b-12d3-a456-426614174000' })
+  @ApiOkResponse({
+    description: 'Webhook delivery scheduled for manual retry.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Delivery is not failed or dead-lettered.',
+  })
+  @ApiNotFoundResponse({
+    description: 'Webhook delivery not found.',
+  })
+  async retryFailedDelivery(@Param('deliveryId') deliveryId: string): Promise<void> {
+    return this.webhooksService.retryFailedDelivery(deliveryId);
+  }
 }

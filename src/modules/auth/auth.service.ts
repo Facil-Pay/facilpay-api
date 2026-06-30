@@ -25,6 +25,9 @@ import { LoginDto } from '../users/dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { TwoFactorCodeDto } from './dto/two-factor-code.dto';
+import { DisableTwoFactorDto } from './dto/disable-two-factor.dto';
+import { authenticator } from 'otplib';
+import * as qrcode from 'qrcode';
 import { UsersService } from '../users/users.service';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
@@ -164,14 +167,18 @@ export class AuthService {
         };
       }
 
-      if (
-        !user.twoFactorSecret ||
-        !this.verifyTotpCode(
-          this.decryptTwoFactorSecret(user.twoFactorSecret),
-          loginDto.twoFactorCode,
-        )
-      ) {
+      if (!user.twoFactorSecret) {
         throw new UnauthorizedException('Invalid two-factor code');
+      }
+
+      const secret = this.decryptTwoFactorSecret(user.twoFactorSecret);
+      const isTotpValid = loginDto.twoFactorCode.length === 6 ? authenticator.verify({ token: loginDto.twoFactorCode, secret }) : false;
+
+      if (!isTotpValid) {
+        const isBackupCodeValid = await this.usersService.consumeBackupCode(user.id, loginDto.twoFactorCode);
+        if (!isBackupCodeValid) {
+          throw new UnauthorizedException('Invalid two-factor code');
+        }
       }
     }
 
@@ -191,15 +198,27 @@ export class AuthService {
 
   async enableTwoFactor(
     userId: string,
-  ): Promise<{ secret: string; qrCodeUri: string; otpauthUri: string }> {
+  ): Promise<{ secret: string; qrCodeUri: string; otpauthUri: string; backupCodes: string[] }> {
     const user = await this.usersService.findByIdWithSecrets(userId);
-    const secret = this.generateBase32Secret();
+    const secret = authenticator.generateSecret();
     const encryptedSecret = this.encryptTwoFactorSecret(secret);
 
     await this.usersService.setTwoFactorSecret(user.id, encryptedSecret);
 
-    const otpauthUri = this.buildOtpAuthUri(user.email, secret);
-    return { secret, qrCodeUri: otpauthUri, otpauthUri };
+    const otpauthUri = authenticator.keyuri(
+      user.email,
+      this.twoFactorIssuer,
+      secret,
+    );
+    const qrCodeUri = await qrcode.toDataURL(otpauthUri);
+
+    const plainBackupCodes = Array.from({ length: 10 }, () => randomBytes(4).toString('hex'));
+    const hashedBackupCodes = await Promise.all(
+      plainBackupCodes.map(code => bcrypt.hash(code, 10))
+    );
+    await this.usersService.updateBackupCodes(user.id, hashedBackupCodes);
+
+    return { secret, qrCodeUri, otpauthUri, backupCodes: plainBackupCodes };
   }
 
   async verifyTwoFactor(
@@ -213,7 +232,8 @@ export class AuthService {
     }
 
     const secret = this.decryptTwoFactorSecret(user.twoFactorSecret);
-    if (!this.verifyTotpCode(secret, dto.code)) {
+    const isValid = authenticator.verify({ token: dto.code, secret });
+    if (!isValid) {
       throw new UnauthorizedException('Invalid two-factor code');
     }
 
@@ -226,7 +246,7 @@ export class AuthService {
 
   async disableTwoFactor(
     userId: string,
-    dto: TwoFactorCodeDto,
+    dto: DisableTwoFactorDto,
   ): Promise<{ message: string; twoFactorEnabled: boolean }> {
     const user = await this.usersService.findByIdWithSecrets(userId);
 
@@ -234,9 +254,9 @@ export class AuthService {
       throw new BadRequestException('Two-factor authentication is not enabled');
     }
 
-    const secret = this.decryptTwoFactorSecret(user.twoFactorSecret);
-    if (!this.verifyTotpCode(secret, dto.code)) {
-      throw new UnauthorizedException('Invalid two-factor code');
+    const isPasswordValid = await bcrypt.compare(dto.password, user.password);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid password');
     }
 
     await this.usersService.disableTwoFactor(user.id);

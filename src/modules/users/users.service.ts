@@ -328,4 +328,54 @@ export class UsersService {
     const { password, ...result } = savedUser;
     return result;
   }
+
+  /**
+   * Two-Factor Authentication Methods
+   */
+  async setTwoFactorSecret(userId: string, secret: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    user.twoFactorSecret = secret;
+    await this.userRepository.save(user);
+  }
+
+  async enableTwoFactor(userId: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    user.twoFactorEnabled = true;
+    await this.userRepository.save(user);
+  }
+
+  async disableTwoFactor(userId: string): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    user.twoFactorEnabled = false;
+    user.twoFactorSecret = null;
+    user.backupCodes = null;
+    await this.userRepository.save(user);
+  }
+
+  async updateBackupCodes(userId: string, backupCodes: string[]): Promise<void> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException(`User with ID ${userId} not found`);
+    user.backupCodes = backupCodes;
+    await this.userRepository.save(user);
+  }
+
+  async consumeBackupCode(userId: string, code: string): Promise<boolean> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || !user.backupCodes || user.backupCodes.length === 0) return false;
+    
+    // Check if code matches any hashed backup code
+    for (let i = 0; i < user.backupCodes.length; i++) {
+      const isMatch = await bcrypt.compare(code, user.backupCodes[i]);
+      if (isMatch) {
+        // Remove the used code
+        user.backupCodes.splice(i, 1);
+        await this.userRepository.save(user);
+        return true;
+      }
+    }
+    return false;
+  }
 }
