@@ -20,6 +20,13 @@ export class Payment {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  /**
+   * The ID of the merchant/user who created this payment.
+   * Nullable for backward compatibility with payments created before this field was added.
+   */
+  @Column({ nullable: true })
+  userId: string | null = null;
+
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 

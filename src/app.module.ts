@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DatabaseModule } from './modules/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -17,6 +17,7 @@ import { StellarModule } from './modules/stellar/stellar.module';
 import { BullModule } from '@nestjs/bullmq';
 import { CorsModule } from './modules/cors/cors.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
     WebhooksModule,
     StellarModule,
     ApiKeysModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
