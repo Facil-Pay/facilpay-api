@@ -65,6 +65,15 @@ curl -X POST http://localhost:3000/payments \
 # Message: "Idempotency key reused with different request body"
 ```
 
+## Cleanup
+
+Expired rows are not removed by a background cron or scheduled Nest task. Cleanup happens in two ways:
+
+1. **Lazy deletion on read** — When a request includes an `Idempotency-Key` that already exists but `expiresAt` is in the past, `IdempotencyService.checkKey()` deletes that row and treats the request as a new key (same as if the key were unknown).
+2. **Bulk delete (optional)** — `IdempotencyService.cleanupExpired()` deletes all rows where `expiresAt` is before the current time. This method is not invoked automatically by the API; use it from maintenance scripts or ops tooling if you want to purge orphaned expired keys that are never looked up again.
+
+There is no separate cleanup schedule or env var for cleanup timing. Expiry duration is controlled only by `IDEMPOTENCY_TTL_HOURS` (see [Configuration](#configuration)); that value sets `expiresAt` when a key is stored.
+
 ## Database
 
-Idempotency keys are stored in the `idempotency_keys` table with automatic expiry cleanup.
+Idempotency keys are stored in the `idempotency_keys` table. The `expiresAt` column is indexed (`IDX_idempotency_keys_expiresAt`) to support efficient bulk deletes via `cleanupExpired()`.
