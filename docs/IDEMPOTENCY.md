@@ -22,6 +22,22 @@ curl -X POST http://localhost:3000/payments \
 - **Mismatched request** (same key + different body): Returns 422 Unprocessable Entity
 - **Expired key**: Keys expire after 24 hours (configurable via `IDEMPOTENCY_TTL_HOURS`)
 
+## Bulk payments endpoint
+
+The bulk creation endpoint `POST /payments/bulk` does not currently support idempotency keys. An `Idempotency-Key` header is not required for this route, and it is not used to deduplicate or retry the batch. If a bulk request is retried manually, it is treated as a fresh request.
+
+```bash
+curl -X POST http://localhost:3000/payments/bulk \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: bulk-key-123" \
+  -d '[
+    {"amount":100,"currency":"USD","description":"Order #1"},
+    {"amount":200,"currency":"USD","description":"Order #2"}
+  ]'
+```
+
+The request above is processed as a new bulk creation attempt. Duplicate items inside the same batch are not automatically deduplicated; each item is handled as part of the same atomic transaction, and the entire batch is rolled back if any item fails validation or processing.
+
 ## Configuration
 
 Set the TTL in your `.env` file:
