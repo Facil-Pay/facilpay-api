@@ -8,7 +8,13 @@ import {
   IsObject,
 } from 'class-validator';
 import { PaymentStatus } from '../payment.entity';
-import { PaginationDto } from '../../../common/dto/pagination.dto';
+import { PaginationDto, SortOrder } from '../../../common/dto/pagination.dto';
+
+export enum PaymentSortBy {
+  CREATED_AT = 'created_at',
+  AMOUNT = 'amount',
+  STATUS = 'status',
+}
 
 export class GetPaymentsDto extends PaginationDto {
   @ApiPropertyOptional({
@@ -21,6 +27,20 @@ export class GetPaymentsDto extends PaginationDto {
   })
   @IsOptional()
   status?: PaymentStatus;
+
+  @ApiPropertyOptional({
+    enum: PaymentSortBy,
+    default: PaymentSortBy.CREATED_AT,
+    description: 'Sort by field',
+  })
+  @IsEnum(PaymentSortBy)
+  @IsOptional()
+  sortBy?: PaymentSortBy = PaymentSortBy.CREATED_AT;
+
+  @ApiPropertyOptional({ enum: SortOrder, default: SortOrder.DESC, description: 'Sort order' })
+  @IsEnum(SortOrder)
+  @IsOptional()
+  order?: SortOrder = SortOrder.DESC;
 
   @ApiPropertyOptional({
     description: 'Filter by currency code (e.g., USD, EUR)',

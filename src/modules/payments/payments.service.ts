@@ -1,12 +1,14 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
 import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
-import { GetPaymentsDto } from './dto/get-payments.dto';
+import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
+import { SortOrder } from '../../common/dto/pagination.dto';
+import { CursorPaginatedResult, PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { PaymentSseService } from './payment-sse.service';
@@ -117,44 +119,95 @@ export class PaymentsService {
     }
   }
 
-  async findAll(getPaymentsDto: GetPaymentsDto): Promise<Payment[]> {
+  async findAll(
+    getPaymentsDto: GetPaymentsDto,
+  ): Promise<CursorPaginatedResult<Payment> | PaginatedResult<Payment>> {
+    if (getPaymentsDto.cursor) {
+      return this.findWithCursor(getPaymentsDto);
+    }
+    return this.findWithOffset(getPaymentsDto);
+  }
+
+  private async findWithOffset(dto: GetPaymentsDto): Promise<PaginatedResult<Payment>> {
+    const query = this.buildFilterQuery(dto);
+
+    const page = dto.page || 1;
+    const limit = dto.limit || 20;
+    const skip = (page - 1) * limit;
+    query.skip(skip).take(limit);
+
+    this.applyOrder(query, dto);
+
+    const [data, total] = await query.getManyAndCount();
+
+    return { data, total, page, limit };
+  }
+
+  private async findWithCursor(dto: GetPaymentsDto): Promise<CursorPaginatedResult<Payment>> {
+    const decoded = this.decodeCursor(dto.cursor!);
+    const limit = dto.limit || 20;
+    const order = dto.order || SortOrder.DESC;
+    const sortBy = dto.sortBy || PaymentSortBy.CREATED_AT;
+
+    const query = this.buildFilterQuery(dto);
+
+    this.applyCursorCondition(query, sortBy, order, decoded);
+
+    query.take(limit + 1);
+    this.applyOrder(query, dto);
+
+    const payments = await query.getMany();
+
+    const hasMore = payments.length > limit;
+    if (hasMore) {
+      payments.pop();
+    }
+
+    const lastPayment = payments[payments.length - 1];
+    const nextCursor = lastPayment
+      ? this.encodeCursor(sortBy, lastPayment)
+      : null;
+
+    return { data: payments, nextCursor, hasMore };
+  }
+
+  private buildFilterQuery(dto: GetPaymentsDto): SelectQueryBuilder<Payment> {
     const query = this.paymentRepository.createQueryBuilder('payment');
 
-    // Apply filters - all conditions use AND logic
-    if (getPaymentsDto.status) {
-      query.andWhere('payment.status = :status', { status: getPaymentsDto.status });
+    if (dto.status) {
+      query.andWhere('payment.status = :status', { status: dto.status });
     }
 
-    if (getPaymentsDto.currency) {
-      query.andWhere('payment.currency = :currency', { currency: getPaymentsDto.currency });
+    if (dto.currency) {
+      query.andWhere('payment.currency = :currency', { currency: dto.currency });
     }
 
-    if (getPaymentsDto.minAmount !== undefined) {
-      query.andWhere('payment.amount >= :minAmount', { minAmount: getPaymentsDto.minAmount });
+    if (dto.minAmount !== undefined) {
+      query.andWhere('payment.amount >= :minAmount', { minAmount: dto.minAmount });
     }
 
-    if (getPaymentsDto.maxAmount !== undefined) {
-      query.andWhere('payment.amount <= :maxAmount', { maxAmount: getPaymentsDto.maxAmount });
+    if (dto.maxAmount !== undefined) {
+      query.andWhere('payment.amount <= :maxAmount', { maxAmount: dto.maxAmount });
     }
 
-    if (getPaymentsDto.from) {
-      query.andWhere('payment.createdAt >= :fromDate', { fromDate: getPaymentsDto.from });
+    if (dto.from) {
+      query.andWhere('payment.createdAt >= :fromDate', { fromDate: dto.from });
     }
 
-    if (getPaymentsDto.to) {
-      query.andWhere('payment.createdAt <= :toDate', { toDate: getPaymentsDto.to });
+    if (dto.to) {
+      query.andWhere('payment.createdAt <= :toDate', { toDate: dto.to });
     }
 
-    if (getPaymentsDto.search) {
-      const searchTerm = `%${getPaymentsDto.search}%`;
+    if (dto.search) {
+      const searchTerm = `%${dto.search}%`;
       query.andWhere(
         '(payment.description ILIKE :search OR payment.externalReference ILIKE :search)',
         { search: searchTerm },
       );
     }
 
-    if (getPaymentsDto.metadata) {
-      const entries = Object.entries(getPaymentsDto.metadata);
+    if (dto.metadata) {
+      const entries = Object.entries(dto.metadata);
       entries.forEach(([key, value], i) => {
         query.andWhere(`payment.metadata->>'${key}' = :metaVal${i}`, {
           [`metaVal${i}`]: value,
@@ -162,14 +215,115 @@ export class PaymentsService {
       });
     }
 
-    // Apply pagination
-    const skip = ((getPaymentsDto.page || 1) - 1) * (getPaymentsDto.limit || 20);
-    query.skip(skip).take(getPaymentsDto.limit || 20);
+    return query;
+  }
 
-    // Order by creation date (newest first)
-    query.orderBy('payment.createdAt', 'DESC');
+  private applyOrder(query: SelectQueryBuilder<Payment>, dto: GetPaymentsDto): void {
+    const sortBy = dto.sortBy || PaymentSortBy.CREATED_AT;
+    const order = dto.order || SortOrder.DESC;
 
-    return await query.getMany();
+    switch (sortBy) {
+      case PaymentSortBy.CREATED_AT:
+        query.orderBy('payment.createdAt', order);
+        break;
+      case PaymentSortBy.AMOUNT:
+        query.orderBy('payment.amount', order);
+        break;
+      case PaymentSortBy.STATUS:
+        query.orderBy('payment.status', order);
+        break;
+    }
+
+    query.addOrderBy('payment.id', order);
+  }
+
+  private applyCursorCondition(
+    query: SelectQueryBuilder<Payment>,
+    sortBy: PaymentSortBy,
+    order: SortOrder,
+    decoded: { sortField: string; sortValue: string; paymentId: string },
+  ): void {
+    const { sortValue, paymentId } = decoded;
+    const isDesc = order === SortOrder.DESC;
+    const operator = isDesc ? '<' : '>';
+    const orOperator = isDesc ? '<' : '>';
+
+    const sortColumn = this.resolveSortColumn(sortBy);
+
+    query.andWhere(
+      `(${sortColumn} ${operator} :cursorValue) OR (${sortColumn} = :cursorValueEq AND payment.id ${orOperator} :cursorId)`,
+      {
+        cursorValue: this.parseSortValue(sortBy, sortValue),
+        cursorValueEq: this.parseSortValue(sortBy, sortValue),
+        cursorId: paymentId,
+      },
+    );
+  }
+
+  private resolveSortColumn(sortBy: PaymentSortBy): string {
+    switch (sortBy) {
+      case PaymentSortBy.CREATED_AT:
+        return 'payment.createdAt';
+      case PaymentSortBy.AMOUNT:
+        return 'payment.amount';
+      case PaymentSortBy.STATUS:
+        return 'payment.status';
+    }
+  }
+
+  private parseSortValue(sortBy: PaymentSortBy, value: string): unknown {
+    if (sortBy === PaymentSortBy.AMOUNT) {
+      return Number(value);
+    }
+    return value;
+  }
+
+  private encodeCursor(sortBy: PaymentSortBy, payment: Payment): string {
+    let sortValue: string;
+    switch (sortBy) {
+      case PaymentSortBy.CREATED_AT:
+        sortValue = (payment.createdAt as Date).toISOString();
+        break;
+      case PaymentSortBy.AMOUNT:
+        sortValue = String(payment.amount);
+        break;
+      case PaymentSortBy.STATUS:
+        sortValue = payment.status;
+        break;
+    }
+    const raw = `${sortBy}:${sortValue}:${payment.id}`;
+    return Buffer.from(raw, 'utf-8').toString('base64');
+  }
+
+  private decodeCursor(cursor: string): { sortField: string; sortValue: string; paymentId: string } {
+    let decoded: string;
+    try {
+      decoded = Buffer.from(cursor, 'base64').toString('utf-8');
+    } catch {
+      throw new BadRequestException('Invalid cursor format');
+    }
+
+    const separatorIndex = decoded.indexOf(':');
+    if (separatorIndex === -1) {
+      throw new BadRequestException('Invalid cursor format');
+    }
+
+    const sortField = decoded.substring(0, separatorIndex);
+    const rest = decoded.substring(separatorIndex + 1);
+
+    const lastColonIndex = rest.lastIndexOf(':');
+    if (lastColonIndex === -1) {
+      throw new BadRequestException('Invalid cursor format');
+    }
+
+    const sortValue = rest.substring(0, lastColonIndex);
+    const paymentId = rest.substring(lastColonIndex + 1);
+
+    if (!sortField || !paymentId) {
+      throw new BadRequestException('Invalid cursor format');
+    }
+
+    return { sortField, sortValue, paymentId };
   }
 
   async findOne(id: string): Promise<Payment> {
