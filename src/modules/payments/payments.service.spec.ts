@@ -7,6 +7,7 @@ import { Refund } from './refund.entity';
 import { NotFoundException } from '@nestjs/common';
 import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -84,6 +85,10 @@ describe('PaymentsService', () => {
         {
           provide: IdempotencyService,
           useValue: mockIdempotencyService,
+        },
+        {
+          provide: EmailNotificationService,
+          useValue: { sendMerchantPaymentReceived: jest.fn(), sendPayerPaymentConfirmed: jest.fn(), sendMerchantRefundIssued: jest.fn(), sendPayerRefundProcessed: jest.fn() },
         },
       ],
     }).compile();

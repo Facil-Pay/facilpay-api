@@ -10,6 +10,7 @@ import { GetPaymentsDto } from './dto/get-payments.dto';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { PaymentSseService } from './payment-sse.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 
 @Injectable()
 export class PaymentsService {
@@ -23,6 +24,7 @@ export class PaymentsService {
     private readonly dataSource: DataSource,
     appLogger: AppLogger,
     private readonly paymentSseService: PaymentSseService,
+    private readonly emailNotificationService: EmailNotificationService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
   }
@@ -47,6 +49,8 @@ export class PaymentsService {
 
       const payment = queryRunner.manager.create(Payment, {
         ...createPaymentDto,
+        merchantEmail: createPaymentDto.merchantEmail || null,
+        payerEmail: createPaymentDto.payerEmail || null,
         status: PaymentStatus.PENDING,
       });
 
@@ -253,6 +257,9 @@ export class PaymentsService {
       );
 
       this.paymentSseService.emit(updatedPayment);
+
+      await this.sendRefundNotifications(updatedPayment, savedRefund);
+
       return { payment: updatedPayment, refund: savedRefund };
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -301,6 +308,11 @@ export class PaymentsService {
       );
 
       this.paymentSseService.emit(updatedPayment);
+
+      if (updatedPayment.status === PaymentStatus.COMPLETED) {
+        await this.sendPaymentConfirmedNotifications(updatedPayment);
+      }
+
       return updatedPayment;
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -384,5 +396,56 @@ export class PaymentsService {
 
     this.paymentSseService.emit(updatedPayment);
     return updatedPayment;
+  }
+
+  private async sendPaymentConfirmedNotifications(payment: Payment): Promise<void> {
+    if (payment.merchantEmail) {
+      await this.emailNotificationService.sendMerchantPaymentReceived(
+        payment.merchantEmail,
+        null,
+        payment.id,
+        String(payment.amount),
+        payment.currency,
+        payment.description,
+      ).catch(() => {});
+    }
+
+    if (payment.payerEmail) {
+      await this.emailNotificationService.sendPayerPaymentConfirmed(
+        payment.payerEmail,
+        null,
+        payment.id,
+        String(payment.amount),
+        payment.currency,
+        payment.description,
+      ).catch(() => {});
+    }
+  }
+
+  private async sendRefundNotifications(payment: Payment, refund: Refund): Promise<void> {
+    if (payment.merchantEmail) {
+      await this.emailNotificationService.sendMerchantRefundIssued(
+        payment.merchantEmail,
+        null,
+        payment.id,
+        refund.id,
+        String(refund.amount),
+        String(payment.amount),
+        payment.currency,
+        refund.reason,
+      ).catch(() => {});
+    }
+
+    if (payment.payerEmail) {
+      await this.emailNotificationService.sendPayerRefundProcessed(
+        payment.payerEmail,
+        null,
+        payment.id,
+        refund.id,
+        String(refund.amount),
+        payment.currency,
+        refund.reason,
+      ).catch(() => {});
+    }
   }
 }

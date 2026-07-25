@@ -7,6 +7,7 @@ import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
 import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 
 describe('PaymentsService - Transactions', () => {
   let service: PaymentsService;
@@ -21,6 +22,13 @@ describe('PaymentsService - Transactions', () => {
     status: PaymentStatus.PENDING,
     externalReference: '',
     description: 'Test payment',
+    merchantId: null,
+    merchantEmail: null,
+    payerEmail: null,
+    callbackUrl: null,
+    refundedAmount: 0,
+    cancelledAt: null,
+    metadata: null,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
@@ -87,6 +95,10 @@ describe('PaymentsService - Transactions', () => {
         {
           provide: IdempotencyService,
           useValue: mockIdempotencyService,
+        },
+        {
+          provide: EmailNotificationService,
+          useValue: { sendMerchantPaymentReceived: jest.fn(), sendPayerPaymentConfirmed: jest.fn(), sendMerchantRefundIssued: jest.fn(), sendPayerRefundProcessed: jest.fn() },
         },
       ],
     }).compile();

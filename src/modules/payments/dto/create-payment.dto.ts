@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsUrl,
+  IsEmail,
   Min,
   MaxLength,
   IsPositive,
@@ -82,6 +83,22 @@ export class CreatePaymentDto {
     maxLength: 2048,
   })
   callbackUrl?: string;
+
+  @IsEmail()
+  @IsOptional()
+  @ApiPropertyOptional({
+    description: 'Email address of the merchant for notifications',
+    example: 'merchant@example.com',
+  })
+  merchantEmail?: string;
+
+  @IsEmail()
+  @IsOptional()
+  @ApiPropertyOptional({
+    description: 'Email address of the payer for notifications',
+    example: 'payer@example.com',
+  })
+  payerEmail?: string;
 
   @IsObject()
   @IsMetadata()

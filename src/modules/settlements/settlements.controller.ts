@@ -34,7 +34,7 @@ export class SettlementsController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Configure settlement schedule',
-    description: 'Create or update the calling merchant's settlement schedule (daily/weekly/monthly).',
+    description: 'Create or update the calling merchant\'s settlement schedule (daily/weekly/monthly).',
   })
   @ApiOkResponse({ description: 'Settlement config saved.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
