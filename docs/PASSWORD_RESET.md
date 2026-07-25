@@ -91,6 +91,28 @@ POST /auth/reset-password
    - Marks token as used
    - Invalidates all refresh tokens (logs out all sessions)
 
+## Two-Factor Authentication (2FA) Behavior
+
+When a user with 2FA enabled resets their password:
+
+- **2FA remains active**: The password reset flow does NOT disable two-factor authentication
+- **No 2FA code required**: The reset process itself does not require a 2FA code (only the email token)
+- **Login after reset**: After successful password reset, the user must log in with their new password AND provide their 2FA code (or use a backup code)
+- **2FA settings preserved**: The TOTP secret, enabled status, and backup codes remain unchanged
+
+This design ensures that users who have enabled 2FA maintain their security settings even after password recovery, preventing attackers from bypassing 2FA by initiating a password reset.
+
+### Example Flow for 2FA-Enabled Accounts
+
+1. User requests password reset (no 2FA code needed)
+2. User receives email with reset token
+3. User submits new password with token
+4. System resets password and invalidates all sessions
+5. User attempts to log in with new password
+6. System prompts for 2FA code (since 2FA is still enabled)
+7. User provides 2FA code from authenticator app or backup code
+8. Login successful
+
 ## Security Features
 
 ### User Enumeration Protection
