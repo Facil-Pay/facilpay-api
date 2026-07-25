@@ -17,6 +17,7 @@ import { StellarModule } from './modules/stellar/stellar.module';
 import { BullModule } from '@nestjs/bullmq';
 import { CorsModule } from './modules/cors/cors.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
     WebhooksModule,
     StellarModule,
     ApiKeysModule,
+    NotificationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

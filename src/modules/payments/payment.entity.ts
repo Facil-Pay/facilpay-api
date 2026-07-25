@@ -48,6 +48,15 @@ export class Payment {
   @Column({ nullable: true })
   cancelledAt: Date | null = null;
 
+  @Column({ nullable: true })
+  merchantId: string | null = null;
+
+  @Column({ nullable: true })
+  merchantEmail: string | null = null;
+
+  @Column({ nullable: true })
+  payerEmail: string | null = null;
+
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, string> | null = null;
 
