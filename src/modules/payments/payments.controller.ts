@@ -53,9 +53,10 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-response.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
-import { GetPaymentsDto } from './dto/get-payments.dto';
+import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { Payment } from './payment.entity';
 import { Refund } from './refund.entity';
+import { SortOrder } from '../../common/dto/pagination.dto';
 import { WebhookThrottle, BulkThrottle } from '../throttler/throttler.decorator';
 import { WebhookGuard } from './webhook.guard';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
@@ -245,20 +246,69 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'List all payments',
     description:
-      'Returns payments with optional filtering by status, currency, date range, and amount range. Supports free-text search against description and externalReference. Results ordered by creation date (newest first).',
+      'Returns payments with optional filtering by status, currency, date range, and amount range. Supports free-text search against description and externalReference. ' +
+      'Supports cursor-based pagination (cursor param) and offset-based pagination (page param, default). ' +
+      'When cursor is provided, the response includes nextCursor and hasMore fields for efficient navigation through large datasets. ' +
+      'Sortable by created_at (default), amount, or status.',
   })
+  @ApiQuery({ name: 'cursor', required: false, description: 'Cursor for cursor-based pagination (base64-encoded from previous response nextCursor). When provided, page is ignored.' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: PaymentSortBy, description: 'Sort by field (default: created_at)' })
+  @ApiQuery({ name: 'order', required: false, enum: SortOrder, description: 'Sort order (default: DESC)' })
   @ApiOkResponse({
-    description: 'List of payments.',
-    type: [Payment],
+    description: 'Paginated list of payments. Returns CursorPaginatedResult when cursor param is used, otherwise PaginatedResult.',
+    schema: {
+      oneOf: [
+        {
+          example: {
+            data: [
+              {
+                id: '123e4567-e89b-12d3-a456-426614174000',
+                amount: 100.5,
+                currency: 'USD',
+                status: 'COMPLETED',
+                description: 'Payment for order #12345',
+                externalReference: 'ext_ref_123',
+                refundedAmount: 0,
+                cancelledAt: null,
+                metadata: null,
+                createdAt: '2026-01-26T10:00:00.000Z',
+                updatedAt: '2026-01-26T10:05:00.000Z',
+              },
+            ],
+            nextCursor: 'Y3JlYXRlZF9hdDoyMDI2LTAxLTI2VDEwOjAwOjAwLjAwMFo6MTIzZTQ1NjctZTg5Yi0xMmQzLWE0NTYtNDI2NjE0MTc0MDAw',
+            hasMore: true,
+          },
+        },
+        {
+          example: {
+            data: [],
+            total: 0,
+            page: 1,
+            limit: 20,
+          },
+        },
+      ],
+    },
   })
   @ApiBadRequestResponse({
-    description: 'Invalid filter parameters provided.',
+    description: 'Invalid filter parameters or cursor provided.',
     schema: {
-      example: {
-        statusCode: 400,
-        message: 'from date must not be greater than to date',
-        error: 'Bad Request',
-      },
+      oneOf: [
+        {
+          example: {
+            statusCode: 400,
+            message: 'from date must not be greater than to date',
+            error: 'Bad Request',
+          },
+        },
+        {
+          example: {
+            statusCode: 400,
+            message: 'Invalid cursor format',
+            error: 'Bad Request',
+          },
+        },
+      ],
     },
   })
   @ApiInternalServerErrorResponse({
@@ -267,8 +317,7 @@ export class PaymentsController {
       example: { statusCode: 500, message: 'Internal server error' },
     },
   })
-  findAll(@Query() getPaymentsDto: GetPaymentsDto) {
-    // Validate date range
+  async findAll(@Query() getPaymentsDto: GetPaymentsDto) {
     if (getPaymentsDto.from && getPaymentsDto.to) {
       const fromTime = new Date(getPaymentsDto.from).getTime();
       const toTime = new Date(getPaymentsDto.to).getTime();
