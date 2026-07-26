@@ -4,6 +4,7 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
 export enum PaymentStatus {
@@ -67,6 +68,10 @@ export class Payment {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, string> | null = null;
+
+  @Index()
+  @Column({ nullable: true })
+  settlementId: string | null = null;
 
   @CreateDateColumn()
   createdAt: Date;

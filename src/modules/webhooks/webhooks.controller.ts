@@ -246,6 +246,52 @@ export class WebhooksController {
     return this.webhooksService.sendTest(id, user.id);
   }
 
+  @Post(':id/rotate-secret')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Rotate the signing secret for a webhook endpoint',
+    description:
+      'Generates a new signing secret for an existing webhook endpoint. The previous secret stops validating new deliveries immediately. The new secret is returned exactly once in this response — store it securely, as it cannot be retrieved again.',
+  })
+  @ApiParam({ name: 'id', description: 'Webhook endpoint UUID', example: '123e4567-e89b-12d3-a456-426614174000' })
+  @ApiOkResponse({
+    description: 'Signing secret rotated.',
+    type: WebhookEndpoint,
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        merchantId: 'abc123',
+        url: 'https://merchant.example.com/webhooks',
+        events: ['payment.created', 'payment.completed'],
+        isActive: true,
+        secret: 'whsec_newsecret123...',
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T12:00:00.000Z',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  @ApiForbiddenResponse({
+    description: 'Endpoint belongs to a different merchant.',
+    schema: { example: { statusCode: 403, message: 'Forbidden', error: 'Forbidden' } },
+  })
+  @ApiNotFoundResponse({
+    description: 'Webhook endpoint not found.',
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'Webhook endpoint 123e4567-e89b-12d3-a456-426614174000 not found',
+        error: 'Not Found',
+      },
+    },
+  })
+  rotateSecret(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<WebhookEndpoint> {
+    return this.webhooksService.rotateSecret(id, user.id);
+  }
+
   @Post('deliveries/:deliveryId/retry')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

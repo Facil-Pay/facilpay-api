@@ -63,6 +63,14 @@ export class WebhooksService {
     this.logger.info({ endpointId: id, merchantId }, 'Webhook endpoint deleted');
   }
 
+  async rotateSecret(id: string, merchantId: string): Promise<WebhookEndpoint> {
+    const endpoint = await this.findOwned(id, merchantId);
+    endpoint.secret = `whsec_${randomBytes(32).toString('hex')}`;
+    const updated = await this.repo.save(endpoint);
+    this.logger.info({ endpointId: id, merchantId }, 'Webhook signing secret rotated');
+    return updated;
+  }
+
   async sendTest(id: string, merchantId: string): Promise<{ delivered: boolean; statusCode: number | null; error: string | null }> {
     const endpoint = await this.findOwned(id, merchantId);
 

@@ -112,6 +112,13 @@ export class StellarService {
     }
   }
 
+  async listTransactions(status?: MultiSigTransactionStatus): Promise<MultiSigTransaction[]> {
+    return this.multiSigRepo.find({
+      where: status ? { status } : {},
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async signTransaction(id: string, dto: SignTransactionDto, merchantId?: string): Promise<MultiSigTransaction> {
     const multiSigTx = await this.multiSigRepo.findOneBy({ id });
     if (!multiSigTx) {

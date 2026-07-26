@@ -1,8 +1,10 @@
 import {
   Controller,
+  Get,
   Post,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -13,13 +15,15 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiParam,
+  ApiQuery,
   ApiOkResponse,
   ApiNotFoundResponse,
   ApiBadRequestResponse,
 } from '@nestjs/swagger';
 import { StellarService } from './stellar.service';
 import { SignTransactionDto } from './dto/sign-transaction.dto';
-import { MultiSigTransaction } from './entities/multi-sig-transaction.entity';
+import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { MultiSigTransaction, MultiSigTransactionStatus } from './entities/multi-sig-transaction.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('stellar')
@@ -28,6 +32,21 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @Controller('v1/stellar')
 export class StellarController {
   constructor(private readonly stellarService: StellarService) {}
+
+  @Get('transactions')
+  @ApiOperation({
+    summary: 'List multi-sig transactions',
+    description:
+      'Returns multi-sig transactions, optionally filtered by status. Each transaction includes its current collected signature count versus the required threshold, so signers can discover which transactions still need their signature.',
+  })
+  @ApiQuery({ name: 'status', required: false, enum: MultiSigTransactionStatus, description: 'Filter by transaction status.' })
+  @ApiOkResponse({
+    description: 'List of multi-sig transactions.',
+    type: [MultiSigTransaction],
+  })
+  async listTransactions(@Query() dto: ListTransactionsDto): Promise<MultiSigTransaction[]> {
+    return this.stellarService.listTransactions(dto.status);
+  }
 
   @Post('transactions/:id/sign')
   @HttpCode(HttpStatus.OK)

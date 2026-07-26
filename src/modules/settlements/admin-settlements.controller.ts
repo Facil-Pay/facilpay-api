@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -31,5 +31,28 @@ export class AdminSettlementsController {
   @ApiForbiddenResponse({ description: 'Admin role required.' })
   findAll() {
     return this.service.findAllSettlements();
+  }
+
+  @Post('run')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Manually trigger a settlement run',
+    description:
+      'Admin-only endpoint. Triggers an out-of-band settlement run for all merchants with a configured settlement schedule, independent of the regular cron schedule. Returns a summary of the settlement batches created.',
+  })
+  @ApiOkResponse({
+    description: 'Settlement run summary.',
+    schema: {
+      example: {
+        settlementsCreated: 2,
+        totalAmount: 1523.75,
+        settlements: [],
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  @ApiForbiddenResponse({ description: 'Admin role required.' })
+  runSettlements() {
+    return this.service.triggerManualRun();
   }
 }
