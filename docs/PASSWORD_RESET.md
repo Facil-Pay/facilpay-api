@@ -194,6 +194,17 @@ curl -X POST http://localhost:3000/auth/reset-password \
 }
 ```
 
+**Response Headers:**
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 900
+X-RateLimit-Limit: 5
+X-RateLimit-Remaining: 0
+X-RateLimit-Reset: 1711396800
+```
+
+The `Retry-After` header indicates the number of seconds the client should wait before retrying (900 seconds = 15 minutes). The rate-limit window resets once the full 15-minute period has elapsed since the first request in the window. After the `Retry-After` duration passes, the counter resets and the client can make up to 5 new requests.
+
 ## Database Schema
 
 ### password_reset_tokens Table
