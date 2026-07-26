@@ -31,6 +31,7 @@ import { MerchantsModule } from '../merchants/merchants.module';
   controllers: [PaymentsController, CurrenciesController],
   providers: [
     PaymentsService,
+    DisputesService,
     WebhookSignatureService,
     WebhookGuard,
     IdempotencyService,
@@ -38,7 +39,7 @@ import { MerchantsModule } from '../merchants/merchants.module';
     CurrencyConfigService,
     PaymentSseService,
   ],
-  exports: [PaymentsService, WebhookSignatureService, WebhookGuard],
+  exports: [PaymentsService, WebhookSignatureService, WebhookGuard, DisputesService],
 })
 export class PaymentsModule {}
 

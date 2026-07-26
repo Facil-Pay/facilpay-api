@@ -15,6 +15,7 @@ import { PaginatedResult } from '../../common/interfaces';
 import { Query } from '@nestjs/common';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateRateLimitDto } from './dto/update-rate-limit.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -337,5 +338,71 @@ export class UsersController {
   })
   async restore(@Param('id') id: string) {
     return this.usersService.restore(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @Patch(':id/rate-limit')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Update user rate limit configuration',
+    description: 'Updates the rate limit configuration for a specific user. Admin only.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'User id.',
+    example: 'abc123',
+  })
+  @ApiBody({
+    type: UpdateRateLimitDto,
+    examples: {
+      enableCustom: {
+        summary: 'Enable custom rate limits',
+        value: {
+          rateLimitEnabled: true,
+          rateLimitLimit: 200,
+          rateLimitTtl: 60000,
+        },
+      },
+      disableCustom: {
+        summary: 'Disable custom rate limits',
+        value: {
+          rateLimitEnabled: false,
+        },
+      },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Rate limit configuration updated successfully.',
+    schema: {
+      example: {
+        id: 'abc123',
+        email: 'jane.doe@example.com',
+        rateLimitEnabled: true,
+        rateLimitLimit: 200,
+        rateLimitTtl: 60000,
+        updatedAt: '2026-01-26T12:00:00.000Z',
+      },
+    },
+  })
+  @ApiForbiddenResponse({
+    description: 'User does not have ADMIN role.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Forbidden',
+      },
+    },
+  })
+  async updateRateLimit(
+    @Param('id') id: string,
+    @Body() updateRateLimitDto: UpdateRateLimitDto,
+  ) {
+    return this.usersService.updateRateLimit(
+      id,
+      updateRateLimitDto.rateLimitEnabled ?? false,
+      updateRateLimitDto.rateLimitLimit ?? null,
+      updateRateLimitDto.rateLimitTtl ?? null,
+    );
   }
 }

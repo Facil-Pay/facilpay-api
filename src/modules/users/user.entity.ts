@@ -48,6 +48,15 @@ export class User {
   @Column({ nullable: true })
   lockedUntil: Date | null = null;
 
+  @Column({ default: false })
+  rateLimitEnabled: boolean = false;
+
+  @Column({ nullable: true })
+  rateLimitLimit: number | null = null;
+
+  @Column({ nullable: true })
+  rateLimitTtl: number | null = null;
+
   @CreateDateColumn()
   createdAt: Date;
 

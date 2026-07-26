@@ -378,4 +378,33 @@ export class UsersService {
     }
     return false;
   }
+
+  /**
+   * Update rate limit configuration for a user (admin only)
+   */
+  async updateRateLimit(
+    userId: string,
+    rateLimitEnabled: boolean,
+    rateLimitLimit: number | null,
+    rateLimitTtl: number | null,
+  ): Promise<Omit<User, 'password'>> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) {
+      throw new Error(`User with ID ${userId} not found`);
+    }
+
+    user.rateLimitEnabled = rateLimitEnabled;
+    user.rateLimitLimit = rateLimitLimit;
+    user.rateLimitTtl = rateLimitTtl;
+    user.updatedAt = new Date();
+
+    const savedUser = await this.userRepository.save(user);
+    this.logger.info(
+      { userId, rateLimitEnabled, rateLimitLimit, rateLimitTtl },
+      'User rate limit configuration updated',
+    );
+
+    const { password, ...result } = savedUser;
+    return result;
+  }
 }
