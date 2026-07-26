@@ -56,6 +56,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
 
     let message = 'An error occurred';
     let error = exception.name;
+    let code: string | undefined;
 
     if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
       const responseObj = exceptionResponse as Record<string, any>;
@@ -65,6 +66,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           ? responseObj.message.join(', ')
           : message);
       error = responseObj.error || error;
+      code = responseObj.code;
     } else if (typeof exceptionResponse === 'string') {
       message = exceptionResponse;
     }
@@ -75,6 +77,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       error,
       timestamp,
       path,
+      ...(code ? { code } : {}),
     };
 
     this.logger.warn(

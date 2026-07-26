@@ -15,6 +15,24 @@ curl -X POST http://localhost:3000/payments \
   -d '{"amount":100,"currency":"USD","description":"Order #12345"}'
 ```
 
+## Key Requirements
+
+The `Idempotency-Key` header must be a single non-empty string. For compatibility and predictability, use a value that:
+
+- is between 1 and 255 characters long
+- contains only ASCII letters, numbers, `-`, `_`, or `.`
+- is unique per payment creation attempt
+
+If the header is missing or malformed, `POST /payments` returns a `400 Bad Request` response with the following body:
+
+```json
+{
+  "statusCode": 400,
+  "message": "Idempotency-Key header is required and must be a non-empty string between 1 and 255 characters",
+  "error": "Bad Request"
+}
+```
+
 ## Behavior
 
 - **First request**: Creates a new payment and caches the response

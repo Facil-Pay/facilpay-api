@@ -13,6 +13,8 @@ export enum PaymentStatus {
   CANCELLED = 'CANCELLED',
   REFUNDED = 'REFUNDED',
   PARTIALLY_REFUNDED = 'PARTIALLY_REFUNDED',
+  EXPIRED = 'EXPIRED',
+  PARTIALLY_COMPLETED = 'PARTIALLY_COMPLETED',
 }
 
 @Entity('payments')
@@ -47,6 +49,12 @@ export class Payment {
 
   @Column({ nullable: true })
   cancelledAt: Date | null = null;
+
+  @Column({ nullable: true })
+  expiresAt: Date | null = null;
+
+  @Column({ nullable: true })
+  expiredAt: Date | null = null;
 
   @Column({ nullable: true })
   merchantId: string | null = null;

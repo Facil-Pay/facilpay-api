@@ -31,6 +31,11 @@ export interface ErrorResponse {
    * Optional validation errors for detailed field-level errors
    */
   validationErrors?: ValidationError[];
+
+  /**
+   * Optional machine-readable error code (e.g. "geo_restricted")
+   */
+  code?: string;
 }
 
 /**

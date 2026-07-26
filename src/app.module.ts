@@ -18,6 +18,8 @@ import { BullModule } from '@nestjs/bullmq';
 import { CorsModule } from './modules/cors/cors.module';
 import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { RatesModule } from './modules/rates/rates.module';
+import { MerchantsModule } from './modules/merchants/merchants.module';
 
 @Module({
   imports: [
@@ -45,6 +47,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     StellarModule,
     ApiKeysModule,
     NotificationsModule,
+    RatesModule,
+    MerchantsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
