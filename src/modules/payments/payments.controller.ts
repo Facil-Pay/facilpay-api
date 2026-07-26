@@ -5,6 +5,8 @@ import {
   Body,
   Param,
   Query,
+  Req,
+  Headers,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -17,6 +19,7 @@ import {
 import { Observable } from 'rxjs';
 import { SseJwtGuard } from '../auth/guards/sse-jwt.guard';
 import { PaymentSseService } from './payment-sse.service';
+import { MerchantsService } from '../merchants/merchants.service';
 
 import {
   ApiTags,
@@ -42,7 +45,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/roles';
 import { ExportPaymentsDto } from './dto/export-payments.dto';
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import {
   createPaymentsPdfDocument,
   paymentToCsvRow,
@@ -75,6 +78,7 @@ export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly paymentSseService: PaymentSseService,
+    private readonly merchantsService: MerchantsService,
   ) { }
 
   @Post()
@@ -91,6 +95,13 @@ export class PaymentsController {
       'Optional unique key to ensure idempotent payment creation. Keys are valid for 24 hours. Reusing a key with a different request body returns 422.',
     required: false,
     example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  })
+  @ApiHeader({
+    name: 'X-Test-Mode',
+    description:
+      'Set to "true" to flag this request as a test payment. When the merchant has bypassInTestMode enabled (default), geo-restriction checks are skipped.',
+    required: false,
+    example: 'true',
   })
   @ApiBody({ type: CreatePaymentDto })
   @ApiCreatedResponse({
@@ -130,13 +141,34 @@ export class PaymentsController {
       },
     },
   })
+  @ApiResponse({
+    status: 403,
+    description: 'Payment blocked by merchant geo-restrictions.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Payments from KP are not permitted by this merchant',
+        error: 'Forbidden',
+        code: 'geo_restricted',
+      },
+    },
+  })
   @ApiInternalServerErrorResponse({
     description: 'Internal server error.',
     schema: {
       example: { statusCode: 500, message: 'Internal server error' },
     },
   })
-  create(@Body() createPaymentDto: CreatePaymentDto) {
+  async create(
+    @Body() createPaymentDto: CreatePaymentDto,
+    @Req() req: Request,
+    @Headers('x-test-mode') testModeHeader?: string,
+  ) {
+    await this.merchantsService.enforceGeoRestriction(
+      createPaymentDto.merchantId,
+      req.ip,
+      testModeHeader === 'true',
+    );
     return this.paymentsService.create(createPaymentDto);
   }
 

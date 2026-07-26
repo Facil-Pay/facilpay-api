@@ -6,6 +6,11 @@ import { Refund } from './refund.entity';
 import { DataSource } from 'typeorm';
 import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
+import { PaymentSplit } from './payment-split.entity';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { StellarService } from '../stellar/stellar.service';
+import { ConfigService } from '@nestjs/config';
 import {
   NotFoundException,
   ConflictException,
@@ -75,6 +80,26 @@ describe('PaymentsService - Refunds', () => {
             checkIdempotencyKey: jest.fn().mockResolvedValue(null),
             storeIdempotencyKey: jest.fn().mockResolvedValue(undefined),
           },
+        },
+        {
+          provide: EmailNotificationService,
+          useValue: { sendMerchantPaymentReceived: jest.fn(), sendPayerPaymentConfirmed: jest.fn(), sendMerchantRefundIssued: jest.fn(), sendPayerRefundProcessed: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(PaymentSplit),
+          useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn(), findOneBy: jest.fn() },
+        },
+        {
+          provide: WebhooksService,
+          useValue: { dispatchEventToMerchant: jest.fn().mockResolvedValue(undefined) },
+        },
+        {
+          provide: StellarService,
+          useValue: { sendPayment: jest.fn() },
+        },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn((_key, defaultValue) => defaultValue) },
         },
       ],
     }).compile();

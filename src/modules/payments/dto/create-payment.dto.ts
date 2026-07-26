@@ -9,14 +9,45 @@ import {
   MaxLength,
   IsPositive,
   IsObject,
+  IsInt,
+  IsArray,
+  ArrayMinSize,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
+import { CreatePaymentSplitDto } from './create-payment-split.dto';
 import {
   registerDecorator,
   ValidationOptions,
   ValidationArguments,
 } from 'class-validator';
+
+function IsSplitsSumTo100(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isSplitsSumTo100',
+      target: (object as any).constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown, _args: ValidationArguments) {
+          if (value === undefined || value === null) return true;
+          if (!Array.isArray(value) || value.length === 0) return false;
+          const total = value.reduce(
+            (sum, split) => sum + Number((split as { percentage?: number }).percentage ?? 0),
+            0,
+          );
+          return Math.abs(total - 100) < 0.01;
+        },
+        defaultMessage(_args: ValidationArguments) {
+          return 'splits percentages must sum to exactly 100';
+        },
+      },
+    });
+  };
+}
 
 function IsMetadata(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
@@ -84,6 +115,15 @@ export class CreatePaymentDto {
   })
   callbackUrl?: string;
 
+  @IsString()
+  @IsOptional()
+  @ApiPropertyOptional({
+    description:
+      'ID of the merchant this payment belongs to. Used to apply merchant-specific rules such as geo-restrictions.',
+    example: 'abc123-merchant-uuid',
+  })
+  merchantId?: string;
+
   @IsEmail()
   @IsOptional()
   @ApiPropertyOptional({
@@ -111,4 +151,27 @@ export class CreatePaymentDto {
     additionalProperties: { type: 'string' },
   })
   metadata?: Record<string, string>;
+
+  @IsInt()
+  @IsPositive({ message: 'expiresIn must be a positive number of seconds' })
+  @IsOptional()
+  @ApiPropertyOptional({
+    description:
+      'Number of seconds until this payment expires if still PENDING. Defaults to the global default expiry (30 minutes) when omitted.',
+    example: 1800,
+  })
+  expiresIn?: number;
+
+  @IsArray()
+  @ArrayMinSize(1, { message: 'splits must contain at least one recipient' })
+  @ValidateNested({ each: true })
+  @Type(() => CreatePaymentSplitDto)
+  @IsSplitsSumTo100()
+  @IsOptional()
+  @ApiPropertyOptional({
+    description:
+      'Optional list of recipients to automatically split and distribute this payment to via Stellar once completed. Percentages must sum to exactly 100.',
+    type: [CreatePaymentSplitDto],
+  })
+  splits?: CreatePaymentSplitDto[];
 }
