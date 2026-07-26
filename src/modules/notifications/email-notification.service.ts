@@ -99,6 +99,97 @@ export class EmailNotificationService {
     });
   }
 
+  async sendPayerDisputeOpened(
+    to: string,
+    payerName: string | null,
+    paymentId: string,
+    disputeId: string,
+    amount: string,
+    currency: string,
+    reason: string | null,
+  ): Promise<void> {
+    await this.enqueue({
+      to,
+      subject: `Dispute Opened: ${amount} ${currency}`,
+      templateName: 'payer-dispute-opened',
+      templateData: {
+        payerName: payerName || undefined,
+        paymentAmount: amount,
+        paymentCurrency: currency,
+        paymentId,
+        disputeId,
+        disputeReason: reason || undefined,
+      },
+      eventType: EmailEventType.DISPUTE_OPENED,
+      recipientRole: 'payer',
+      paymentId,
+      includeUnsubscribe: true,
+    });
+  }
+
+  async sendMerchantDisputeStatusChanged(
+    to: string,
+    merchantName: string | null,
+    paymentId: string,
+    disputeId: string,
+    amount: string,
+    currency: string,
+    previousStatus: string,
+    newStatus: string,
+    resolutionNotes: string | null,
+  ): Promise<void> {
+    await this.enqueue({
+      to,
+      subject: `Dispute Status Updated: ${newStatus}`,
+      templateName: 'merchant-dispute-status-changed',
+      templateData: {
+        merchantName: merchantName || undefined,
+        paymentAmount: amount,
+        paymentCurrency: currency,
+        paymentId,
+        disputeId,
+        previousStatus,
+        newStatus,
+        resolutionNotes: resolutionNotes || undefined,
+      },
+      eventType: EmailEventType.DISPUTE_STATUS_CHANGED,
+      recipientRole: 'merchant',
+      paymentId,
+    });
+  }
+
+  async sendPayerDisputeStatusChanged(
+    to: string,
+    payerName: string | null,
+    paymentId: string,
+    disputeId: string,
+    amount: string,
+    currency: string,
+    previousStatus: string,
+    newStatus: string,
+    resolutionNotes: string | null,
+  ): Promise<void> {
+    await this.enqueue({
+      to,
+      subject: `Dispute Status Updated: ${newStatus}`,
+      templateName: 'payer-dispute-status-changed',
+      templateData: {
+        payerName: payerName || undefined,
+        paymentAmount: amount,
+        paymentCurrency: currency,
+        paymentId,
+        disputeId,
+        previousStatus,
+        newStatus,
+        resolutionNotes: resolutionNotes || undefined,
+      },
+      eventType: EmailEventType.DISPUTE_STATUS_CHANGED,
+      recipientRole: 'payer',
+      paymentId,
+      includeUnsubscribe: true,
+    });
+  }
+
   async sendPayerPaymentConfirmed(
     to: string,
     payerName: string | null,

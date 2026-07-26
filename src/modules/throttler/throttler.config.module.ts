@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { MerchantThrottlerGuard } from './merchant-throttler.guard';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -26,12 +28,14 @@ import { APP_GUARD } from '@nestjs/core';
         limit: 1000, // 1000 requests per minute for webhooks
       },
     ]),
+    UsersModule,
   ],
   providers: [
     {
       provide: APP_GUARD,
-      useClass: ThrottlerGuard,
+      useClass: MerchantThrottlerGuard,
     },
   ],
+  exports: [MerchantThrottlerGuard],
 })
 export class ThrottlerConfigModule {}
