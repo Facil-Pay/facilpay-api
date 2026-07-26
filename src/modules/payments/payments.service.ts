@@ -1,8 +1,11 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, LessThanOrEqual, Repository, SelectQueryBuilder } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
+import { PaymentSplit, PaymentSplitStatus } from './payment-split.entity';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
@@ -13,6 +16,10 @@ import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { PaymentSseService } from './payment-sse.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { StellarService } from '../stellar/stellar.service';
+
+const DEFAULT_PAYMENT_EXPIRY_SECONDS = 1800;
 
 @Injectable()
 export class PaymentsService {
@@ -23,10 +30,15 @@ export class PaymentsService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Refund)
     private readonly refundRepository: Repository<Refund>,
+    @InjectRepository(PaymentSplit)
+    private readonly paymentSplitRepository: Repository<PaymentSplit>,
     private readonly dataSource: DataSource,
     appLogger: AppLogger,
     private readonly paymentSseService: PaymentSseService,
     private readonly emailNotificationService: EmailNotificationService,
+    private readonly webhooksService: WebhooksService,
+    private readonly configService: ConfigService,
+    private readonly stellarService: StellarService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
   }
@@ -49,14 +61,33 @@ export class PaymentsService {
         `Starting payment creation transaction for amount: ${createPaymentDto.amount}`,
       );
 
+      const expiresInSeconds =
+        createPaymentDto.expiresIn ?? this.getDefaultExpirySeconds();
+
       const payment = queryRunner.manager.create(Payment, {
         ...createPaymentDto,
         merchantEmail: createPaymentDto.merchantEmail || null,
         payerEmail: createPaymentDto.payerEmail || null,
         status: PaymentStatus.PENDING,
+        expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
       });
 
       const savedPayment = await queryRunner.manager.save(payment);
+
+      if (createPaymentDto.splits?.length) {
+        const splits = createPaymentDto.splits.map((split) =>
+          queryRunner.manager.create(PaymentSplit, {
+            paymentId: savedPayment.id,
+            recipientAddress: split.recipientAddress,
+            percentage: split.percentage,
+            amount: Number(
+              ((Number(savedPayment.amount) * split.percentage) / 100).toFixed(2),
+            ),
+            status: PaymentSplitStatus.PENDING,
+          }),
+        );
+        await queryRunner.manager.save(splits);
+      }
 
       await queryRunner.commitTransaction();
       this.logger.info(`Payment created successfully: ${savedPayment.id}`);
@@ -94,6 +125,11 @@ export class PaymentsService {
         queryRunner.manager.create(Payment, {
           ...createPaymentDto,
           status: PaymentStatus.PENDING,
+          expiresAt: new Date(
+            Date.now() +
+              (createPaymentDto.expiresIn ?? this.getDefaultExpirySeconds()) *
+                1000,
+          ),
         }),
       );
 
@@ -465,6 +501,7 @@ export class PaymentsService {
 
       if (updatedPayment.status === PaymentStatus.COMPLETED) {
         await this.sendPaymentConfirmedNotifications(updatedPayment);
+        await this.processSplitsForPayment(updatedPayment);
       }
 
       return updatedPayment;
@@ -550,6 +587,114 @@ export class PaymentsService {
 
     this.paymentSseService.emit(updatedPayment);
     return updatedPayment;
+  }
+
+  private getDefaultExpirySeconds(): number {
+    return this.configService.get<number>(
+      'PAYMENT_DEFAULT_EXPIRY_SECONDS',
+      DEFAULT_PAYMENT_EXPIRY_SECONDS,
+    );
+  }
+
+  /**
+   * Sweeps for PENDING payments past their expiresAt and transitions them to EXPIRED.
+   * Runs every minute per acceptance criteria for #176.
+   */
+  @Cron(CronExpression.EVERY_MINUTE)
+  async expirePendingPayments(): Promise<void> {
+    const expiredPayments = await this.paymentRepository.find({
+      where: {
+        status: PaymentStatus.PENDING,
+        expiresAt: LessThanOrEqual(new Date()),
+      },
+    });
+
+    for (const payment of expiredPayments) {
+      await this.expirePayment(payment);
+    }
+  }
+
+  private async expirePayment(payment: Payment): Promise<void> {
+    payment.status = PaymentStatus.EXPIRED;
+    payment.expiredAt = new Date();
+
+    const updatedPayment = await this.paymentRepository.save(payment);
+    this.logger.info(
+      { paymentId: payment.id },
+      'Payment expired after exceeding its expiry window',
+    );
+
+    this.paymentSseService.emit(updatedPayment);
+
+    if (updatedPayment.merchantId) {
+      await this.webhooksService
+        .dispatchEventToMerchant(updatedPayment.merchantId, 'payment.expired', {
+          paymentId: updatedPayment.id,
+          amount: updatedPayment.amount,
+          currency: updatedPayment.currency,
+          expiredAt: updatedPayment.expiredAt,
+        })
+        .catch((e) => this.logger.error('Failed to dispatch payment.expired webhook', e));
+    }
+  }
+
+  /**
+   * Executes each split as a separate Stellar transaction once the parent payment
+   * has completed. On partial failure, the parent payment is marked
+   * PARTIALLY_COMPLETED per #178 acceptance criteria.
+   */
+  private async processSplitsForPayment(payment: Payment): Promise<void> {
+    const splits = await this.paymentSplitRepository.find({
+      where: { paymentId: payment.id, status: PaymentSplitStatus.PENDING },
+    });
+
+    if (splits.length === 0) return;
+
+    let failedCount = 0;
+
+    for (const split of splits) {
+      try {
+        const result = await this.stellarService.sendPayment(
+          split.recipientAddress,
+          String(split.amount),
+          undefined,
+          payment.merchantId ?? undefined,
+        );
+
+        split.status = PaymentSplitStatus.COMPLETED;
+        split.stellarTransactionHash = result?.hash ?? null;
+      } catch (error) {
+        failedCount += 1;
+        split.status = PaymentSplitStatus.FAILED;
+        split.failureReason =
+          error instanceof Error ? error.message : 'Unknown error';
+        this.logger.error(
+          { paymentId: payment.id, splitId: split.id },
+          `Split execution failed: ${split.failureReason}`,
+        );
+      }
+
+      await this.paymentSplitRepository.save(split);
+    }
+
+    if (failedCount > 0) {
+      payment.status = PaymentStatus.PARTIALLY_COMPLETED;
+      const updatedPayment = await this.paymentRepository.save(payment);
+      this.paymentSseService.emit(updatedPayment);
+    }
+
+    if (payment.merchantId) {
+      await this.webhooksService
+        .dispatchEventToMerchant(payment.merchantId, 'payment.split_processed', {
+          paymentId: payment.id,
+          totalSplits: splits.length,
+          failedSplits: failedCount,
+          status: payment.status,
+        })
+        .catch((e) =>
+          this.logger.error('Failed to dispatch payment.split_processed webhook', e),
+        );
+    }
   }
 
   private async sendPaymentConfirmedNotifications(payment: Payment): Promise<void> {
