@@ -7,9 +7,7 @@ import { Refund } from './refund.entity';
 import { NotFoundException, BadRequestException } from '@nestjs/common';
 import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
-import { PaymentSseService } from './payment-sse.service';
-import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
-import { SortOrder } from '../../common/dto/pagination.dto';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -145,8 +143,8 @@ describe('PaymentsService', () => {
           useValue: mockIdempotencyService,
         },
         {
-          provide: PaymentSseService,
-          useValue: mockPaymentSseService,
+          provide: EmailNotificationService,
+          useValue: { sendMerchantPaymentReceived: jest.fn(), sendPayerPaymentConfirmed: jest.fn(), sendMerchantRefundIssued: jest.fn(), sendPayerRefundProcessed: jest.fn() },
         },
       ],
     }).compile();
