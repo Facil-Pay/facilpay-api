@@ -294,3 +294,21 @@ The `refund.issued` event fires **identically** for both partial and full refund
 - Compare `data.payment.refundedAmount` to `data.payment.amount`: equal values mean the payment is fully refunded.
 
 When a full refund is the result of a series of partial refunds, the most recent `refund` entry is what you receive — your integration should sum all `refund` records for a payment to reconstruct the full history (the GET payment endpoint returns the `refunds` array).
+
+## Permissions & Role Requirements
+
+The `POST /payments/:id/refund` endpoint is a secured route requiring a valid Bearer authentication token. Access controls are handled by the system's `RolesGuard` mapping.
+
+Because no localized role overrides are explicitly bound to the refund method, any authenticated user profile with a valid system token can trigger a refund:
+
+| Role | Permission Level | Can Issue Refunds? |
+| :--- | :--- | :--- |
+| **`ADMIN`** | Complete Workspace Access | **Yes** |
+| **`USER`** | Base Account Access | **Yes** |
+
+### Authentication Contract
+Requests must include a valid JSON Web Token (JWT) in the header metadata:
+```http
+Authorization: Bearer <your_jwt_token>
+```
+Failure to provide a valid token results in a `401 Unauthorized` response contract.
