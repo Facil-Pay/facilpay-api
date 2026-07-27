@@ -2,6 +2,7 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { CorsConfig } from './cors-config.interface';
+import type { CorsOptions } from '@nestjs/common/interfaces/external/cors-options.interface';
 
 @Injectable()
 export class CorsConfigService {
@@ -12,18 +13,19 @@ export class CorsConfigService {
   }
 
   private loadConfig(): CorsConfig {
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',').filter(Boolean) || [];
-    const credentials = process.env.CORS_CREDENTIALS === 'true';
+    // Support both CORS_ALLOWED_ORIGINS (new) and ALLOWED_ORIGINS (legacy)
+    const rawOrigins = process.env.CORS_ALLOWED_ORIGINS ?? process.env.ALLOWED_ORIGINS ?? '';
+    const allowedOrigins = rawOrigins.split(',').map((o) => o.trim()).filter(Boolean);
+    const credentials = process.env.CORS_ALLOW_CREDENTIALS === 'true';
 
     const configData = {
       allowedOrigins,
       credentials,
       allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-Id'],
     };
 
-    const config = plainToInstance(CorsConfig, configData);
-    return config;
+    return plainToInstance(CorsConfig, configData);
   }
 
   async validate(): Promise<string[]> {
@@ -56,13 +58,22 @@ export class CorsConfigService {
     return this.config.allowedHeaders || ['Content-Type', 'Authorization'];
   }
 
-  getCorsOptions(): object {
+  getCorsOptions(): CorsOptions {
     const allowedOrigins = this.getAllowedOrigins();
+    const credentials = this.getCredentials();
+
     return {
-      origin: allowedOrigins.length > 0 ? allowedOrigins : false,
-      credentials: this.getCredentials(),
+      // Strict allowlist: only listed origins pass; unlisted get no ACAO header
+      origin: (origin, callback) => {
+        // Allow server-to-server requests (no Origin header)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+        callback(null, false);
+      },
+      credentials,
       methods: this.getAllowedMethods(),
       allowedHeaders: this.getAllowedHeaders(),
+      exposedHeaders: ['X-Correlation-Id'],
     };
   }
 }
