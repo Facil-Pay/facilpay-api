@@ -89,7 +89,7 @@ export class WebhooksService {
   }
 
   async dispatchEventToMerchant(merchantId: string, event: string, data: any): Promise<void> {
-    const endpoints = await this.repo.find({ where: { merchantId } });
+    const endpoints = await this.repo.find({ where: { merchantId, isActive: true } });
     const payload = {
       event,
       timestamp: new Date().toISOString(),
@@ -97,8 +97,10 @@ export class WebhooksService {
     };
 
     for (const endpoint of endpoints) {
-      // Check if endpoint is enabled or filtered by event (assuming all are sent if no filter)
-      await this.dispatchEventToEndpoint(endpoint, payload);
+      // Only deliver to endpoints subscribed to this event type
+      if (endpoint.events.includes(event as any)) {
+        await this.dispatchEventToEndpoint(endpoint, payload);
+      }
     }
   }
 

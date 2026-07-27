@@ -137,12 +137,40 @@ export class UsersController {
     return this.usersService.updateProfile(user.id, updateUserDto);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('me')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Get current user profile',
+    description: 'Returns the authenticated user\'s profile. Password and 2FA secret are never included.',
+  })
+  @ApiOkResponse({
+    description: 'Authenticated user profile.',
+    schema: {
+      example: {
+        id: 'abc123',
+        email: 'jane.doe@example.com',
+        name: 'Jane Doe',
+        roles: ['USER'],
+        isEmailVerified: true,
+        isActive: true,
+        createdAt: '2026-01-26T10:00:00.000Z',
+        updatedAt: '2026-01-26T10:00:00.000Z',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing/invalid access token.',
+    schema: { example: { statusCode: 401, message: 'Unauthorized' } },
+  })
+  getMe(@CurrentUser() user: User) {
+    return this.usersService.findOne(user.id);
+  }
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.ADMIN)
   @Get()
   @ApiBearerAuth('bearer')
-  @ApiOperation({
-    summary: 'List users',
     description:
       'Returns paginated users (passwords are never returned). Admin only.',
   })
