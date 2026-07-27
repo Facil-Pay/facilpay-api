@@ -36,7 +36,8 @@ function IsSplitsSumTo100(validationOptions?: ValidationOptions) {
           if (value === undefined || value === null) return true;
           if (!Array.isArray(value) || value.length === 0) return false;
           const total = value.reduce(
-            (sum, split) => sum + Number((split as { percentage?: number }).percentage ?? 0),
+            (sum, split) =>
+              sum + Number((split as { percentage?: number }).percentage ?? 0),
             0,
           );
           return Math.abs(total - 100) < 0.01;
@@ -74,10 +75,51 @@ function IsMetadata(validationOptions?: ValidationOptions) {
   };
 }
 
+function IsAmountWithinConfiguredLimits(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isAmountWithinConfiguredLimits',
+      target: (object as any).constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown) {
+          if (
+            value === undefined ||
+            value === null ||
+            typeof value !== 'number'
+          ) {
+            return true;
+          }
+          const min = Number(process.env.PAYMENT_MIN_AMOUNT ?? 0);
+          const max = Number(
+            process.env.PAYMENT_MAX_AMOUNT ?? Number.MAX_SAFE_INTEGER,
+          );
+          return (
+            (min ? value >= min : true) &&
+            (max !== Number.MAX_SAFE_INTEGER ? value <= max : true)
+          );
+        },
+        defaultMessage() {
+          const min = Number(process.env.PAYMENT_MIN_AMOUNT ?? 0);
+          const max = Number(
+            process.env.PAYMENT_MAX_AMOUNT ?? Number.MAX_SAFE_INTEGER,
+          );
+          const parts = [] as string[];
+          if (min) parts.push(`minimum ${min}`);
+          if (max !== Number.MAX_SAFE_INTEGER) parts.push(`maximum ${max}`);
+          return `Amount must be within the configured payment limits (${parts.join(' and ')})`;
+        },
+      },
+    });
+  };
+}
+
 export class CreatePaymentDto {
   @IsNumber()
   @IsNotEmpty()
   @IsPositive({ message: 'Amount must be a positive number' })
+  @IsAmountWithinConfiguredLimits()
   @Min(0.01, { message: 'Amount must be at least 0.01' })
   @ApiProperty({
     description: 'Payment amount (must be positive)',
@@ -89,7 +131,8 @@ export class CreatePaymentDto {
   @IsString()
   @IsNotEmpty({ message: 'Currency is required' })
   @ApiProperty({
-    description: 'Currency code (ISO 4217). Must be supported by this API instance.',
+    description:
+      'Currency code (ISO 4217). Must be supported by this API instance.',
     example: 'USD',
     maxLength: 3,
   })
@@ -109,7 +152,8 @@ export class CreatePaymentDto {
   @IsUrl({}, { message: 'callbackUrl must be a valid URL' })
   @IsOptional()
   @ApiPropertyOptional({
-    description: 'URL to receive outbound webhook notifications on payment status changes',
+    description:
+      'URL to receive outbound webhook notifications on payment status changes',
     example: 'https://merchant.example.com/webhooks/payment',
     maxLength: 2048,
   })

@@ -48,6 +48,15 @@ export class Payment {
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   refundedAmount: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  feeAmount: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  netAmount: number;
+
+  @Column({ nullable: true })
+  feeBreakdown: string | null = null;
+
   @Column({ nullable: true })
   cancelledAt: Date | null = null;
 

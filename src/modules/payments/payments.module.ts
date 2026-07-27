@@ -18,17 +18,27 @@ import { PaymentSseService } from './payment-sse.service';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { MerchantsModule } from '../merchants/merchants.module';
+import { PaymentQrController } from './payment-qr.controller';
+import { MerchantFeeConfig } from './merchant-fee-config.entity';
+import { PaymentLinksModule } from '../payment-links/payment-links.module';
 
 @Module({
   imports: [
     ConfigModule,
     ScheduleModule.forRoot(),
-    TypeOrmModule.forFeature([Payment, Refund, IdempotencyKey, PaymentSplit]),
+    TypeOrmModule.forFeature([
+      Payment,
+      Refund,
+      IdempotencyKey,
+      PaymentSplit,
+      MerchantFeeConfig,
+    ]),
     WebhooksModule,
     StellarModule,
     MerchantsModule,
+    PaymentLinksModule,
   ],
-  controllers: [PaymentsController, CurrenciesController],
+  controllers: [PaymentsController, CurrenciesController, PaymentQrController],
   providers: [
     PaymentsService,
     DisputesService,
@@ -39,7 +49,11 @@ import { MerchantsModule } from '../merchants/merchants.module';
     CurrencyConfigService,
     PaymentSseService,
   ],
-  exports: [PaymentsService, WebhookSignatureService, WebhookGuard, DisputesService],
+  exports: [
+    PaymentsService,
+    WebhookSignatureService,
+    WebhookGuard,
+    DisputesService,
+  ],
 })
 export class PaymentsModule {}
-

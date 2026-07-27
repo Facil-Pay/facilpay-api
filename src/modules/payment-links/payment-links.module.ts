@@ -8,5 +8,6 @@ import { PaymentLinksController } from './payment-links.controller';
   imports: [TypeOrmModule.forFeature([PaymentLink])],
   controllers: [PaymentLinksController],
   providers: [PaymentLinksService],
+  exports: [PaymentLinksService],
 })
 export class PaymentLinksModule {}
