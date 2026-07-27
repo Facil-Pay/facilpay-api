@@ -11,6 +11,7 @@ import {
   sanitizeHeaders,
 } from './logging.utils';
 import { Logger } from 'pino';
+import { correlationIdStorage } from './correlation-id.context';
 
 const DEFAULT_BODY_MAX_LENGTH = 2048;
 
@@ -36,8 +37,13 @@ export class HttpLoggerMiddleware implements NestMiddleware {
 
   use(req: Request, res: Response, next: NextFunction) {
     const requestId = getRequestId(req.headers) ?? randomUUID();
+    // Accept upstream X-Correlation-Id or generate a fresh one
+    const correlationId =
+      (req.headers['x-correlation-id'] as string | undefined)?.trim() || randomUUID();
+
     req.requestId = requestId;
     res.setHeader('x-request-id', requestId);
+    res.setHeader('x-correlation-id', correlationId);
 
     const startTime = process.hrtime.bigint();
     let responseBody: unknown;
@@ -57,74 +63,79 @@ export class HttpLoggerMiddleware implements NestMiddleware {
       };
     }
 
-    res.on('finish', () => {
-      const durationMs = Number(process.hrtime.bigint() - startTime) / 1e6;
-      const statusCode = res.statusCode;
-      const path = req.originalUrl ?? req.url;
-      const userId = extractUserId(req.user);
+    // Run the rest of the request lifecycle inside the AsyncLocalStorage context
+    // so all log calls within this request automatically carry the correlationId
+    correlationIdStorage.run(correlationId, () => {
+      res.on('finish', () => {
+        const durationMs = Number(process.hrtime.bigint() - startTime) / 1e6;
+        const statusCode = res.statusCode;
+        const path = req.originalUrl ?? req.url;
+        const userId = extractUserId(req.user);
 
-      const meta: Record<string, unknown> = {
-        requestId,
-        method: req.method,
-        path,
-        statusCode,
-        durationMs: Number(durationMs.toFixed(2)),
-        userId,
-      };
+        const meta: Record<string, unknown> = {
+          correlationId,
+          requestId,
+          method: req.method,
+          path,
+          statusCode,
+          durationMs: Number(durationMs.toFixed(2)),
+          userId,
+        };
 
-      const requestMeta: Record<string, unknown> = {};
-      const sanitizedHeaders = sanitizeHeaders(req.headers);
-      if (sanitizedHeaders) {
-        requestMeta.headers = sanitizedHeaders;
-      }
-
-      if (this.logBody) {
-        const sanitizedBody = sanitizeBody(req.body, this.bodyMaxLength);
-        if (sanitizedBody !== undefined) {
-          requestMeta.body = sanitizedBody;
+        const requestMeta: Record<string, unknown> = {};
+        const sanitizedHeaders = sanitizeHeaders(req.headers);
+        if (sanitizedHeaders) {
+          requestMeta.headers = sanitizedHeaders;
         }
-      }
 
-      if (Object.keys(requestMeta).length > 0) {
-        meta.request = requestMeta;
-      }
-
-      const responseMeta: Record<string, unknown> = {};
-      const contentLength = getContentLength(res);
-      if (contentLength !== undefined) {
-        responseMeta.contentLength = contentLength;
-      }
-
-      if (this.logResponseBody) {
-        const sanitizedResponseBody = sanitizeBody(
-          responseBody,
-          this.bodyMaxLength,
-        );
-        if (sanitizedResponseBody !== undefined) {
-          responseMeta.body = sanitizedResponseBody;
+        if (this.logBody) {
+          const sanitizedBody = sanitizeBody(req.body, this.bodyMaxLength);
+          if (sanitizedBody !== undefined) {
+            requestMeta.body = sanitizedBody;
+          }
         }
-      }
 
-      if (Object.keys(responseMeta).length > 0) {
-        meta.response = responseMeta;
-      }
+        if (Object.keys(requestMeta).length > 0) {
+          meta.request = requestMeta;
+        }
 
-      if (statusCode >= 400) {
-        meta.error = normalizeErrorContext(res.locals?.error);
-      }
+        const responseMeta: Record<string, unknown> = {};
+        const contentLength = getContentLength(res);
+        if (contentLength !== undefined) {
+          responseMeta.contentLength = contentLength;
+        }
 
-      const message = `${req.method} ${path} ${statusCode} ${durationMs.toFixed(1)}ms`;
+        if (this.logResponseBody) {
+          const sanitizedResponseBody = sanitizeBody(
+            responseBody,
+            this.bodyMaxLength,
+          );
+          if (sanitizedResponseBody !== undefined) {
+            responseMeta.body = sanitizedResponseBody;
+          }
+        }
 
-      if (statusCode >= 500) {
-        this.logger.error(meta, message);
-      } else if (statusCode >= 400) {
-        this.logger.warn(meta, message);
-      } else {
-        this.logger.info(meta, message);
-      }
+        if (Object.keys(responseMeta).length > 0) {
+          meta.response = responseMeta;
+        }
+
+        if (statusCode >= 400) {
+          meta.error = normalizeErrorContext(res.locals?.error);
+        }
+
+        const message = `${req.method} ${path} ${statusCode} ${durationMs.toFixed(1)}ms`;
+
+        if (statusCode >= 500) {
+          this.logger.error(meta, message);
+        } else if (statusCode >= 400) {
+          this.logger.warn(meta, message);
+        } else {
+          this.logger.info(meta, message);
+        }
+      });
+
+      next();
     });
-
-    next();
   }
 }
 

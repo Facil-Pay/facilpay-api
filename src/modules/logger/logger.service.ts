@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { mkdirSync } from 'node:fs';
 import pino, { Logger } from 'pino';
 import { buildLoggerConfig, buildTransportTargets } from './logger.config';
+import { getCorrelationId } from './correlation-id.context';
 
 @Injectable()
 export class AppLogger implements LoggerService {
@@ -43,22 +44,22 @@ export class AppLogger implements LoggerService {
   }
 
   log(message: any, context?: string) {
-    this.logger.info({ context }, message);
+    this.logger.info({ context, correlationId: getCorrelationId() }, message);
   }
 
   error(message: any, trace?: string, context?: string) {
-    this.logger.error({ context, trace }, message);
+    this.logger.error({ context, trace, correlationId: getCorrelationId() }, message);
   }
 
   warn(message: any, context?: string) {
-    this.logger.warn({ context }, message);
+    this.logger.warn({ context, correlationId: getCorrelationId() }, message);
   }
 
   debug(message: any, context?: string) {
-    this.logger.debug({ context }, message);
+    this.logger.debug({ context, correlationId: getCorrelationId() }, message);
   }
 
   verbose(message: any, context?: string) {
-    this.logger.trace({ context }, message);
+    this.logger.trace({ context, correlationId: getCorrelationId() }, message);
   }
 }

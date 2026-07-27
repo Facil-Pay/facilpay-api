@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DatabaseModule } from './modules/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -20,6 +20,7 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { RatesModule } from './modules/rates/rates.module';
 import { MerchantsModule } from './modules/merchants/merchants.module';
+import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 
 @Module({
   imports: [
@@ -55,6 +56,6 @@ import { MerchantsModule } from './modules/merchants/merchants.module';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(HttpLoggerMiddleware).forRoutes('*');
+    consumer.apply(SecurityHeadersMiddleware, HttpLoggerMiddleware).forRoutes('*');
   }
 }
