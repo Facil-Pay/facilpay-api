@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Settlement } from './entities/settlement.entity';
 import {
@@ -70,7 +70,34 @@ export class SettlementsService {
     }
   }
 
-  private async processMerchantSettlement(config: MerchantSettlementConfig): Promise<void> {
+  async triggerManualRun(): Promise<{
+    settlementsCreated: number;
+    totalAmount: number;
+    settlements: Settlement[];
+  }> {
+    const configs = await this.configRepo.find();
+    const settlements: Settlement[] = [];
+
+    for (const config of configs) {
+      const settlement = await this.processMerchantSettlement(config);
+      if (settlement) settlements.push(settlement);
+    }
+
+    const totalAmount = settlements.reduce(
+      (sum, s) => sum + Number(s.totalAmount),
+      0,
+    );
+
+    return {
+      settlementsCreated: settlements.length,
+      totalAmount,
+      settlements,
+    };
+  }
+
+  private async processMerchantSettlement(
+    config: MerchantSettlementConfig,
+  ): Promise<Settlement | null> {
     const since = config.lastSettledAt ?? new Date(0);
 
     const completedPayments = await this.paymentRepo
@@ -80,7 +107,7 @@ export class SettlementsService {
       .andWhere('p.updatedAt > :since', { since })
       .getMany();
 
-    if (completedPayments.length === 0) return;
+    if (completedPayments.length === 0) return null;
 
     const totalAmount = completedPayments.reduce(
       (sum, p) => sum + Number(p.amount),
@@ -98,10 +125,17 @@ export class SettlementsService {
 
     await this.settlementRepo.save(settlement);
 
+    await this.paymentRepo.update(
+      { id: In(completedPayments.map((p) => p.id)) },
+      { settlementId: settlement.id },
+    );
+
     config.lastSettledAt = new Date();
     await this.configRepo.save(config);
 
     await this.sendSettlementEmail(config.userId, settlement, totalAmount);
+
+    return settlement;
   }
 
   private async sendSettlementEmail(
