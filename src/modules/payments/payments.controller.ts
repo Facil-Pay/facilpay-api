@@ -41,9 +41,6 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { PaymentsService } from './payments.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { UserRole } from '../../common/constants/roles';
 import { ExportPaymentsDto } from './dto/export-payments.dto';
 import type { Request, Response } from 'express';
 import {
@@ -60,26 +57,22 @@ import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { Payment } from './payment.entity';
 import { Refund } from './refund.entity';
 import { SortOrder } from '../../common/dto/pagination.dto';
-import { WebhookThrottle, BulkThrottle } from '../throttler/throttler.decorator';
+import {
+  WebhookThrottle,
+  BulkThrottle,
+} from '../throttler/throttler.decorator';
 import { WebhookGuard } from './webhook.guard';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
-
-
-
-
-
-
-
+import { UpsertMerchantFeeConfigDto } from './dto/upsert-merchant-fee-config.dto';
 
 @ApiTags('payments')
-
 @Controller('v1/payments')
 export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly paymentSseService: PaymentSseService,
     private readonly merchantsService: MerchantsService,
-  ) { }
+  ) {}
 
   @Post()
   @ApiBearerAuth('bearer')
@@ -191,7 +184,8 @@ export class PaymentsController {
     schema: {
       example: {
         statusCode: 400,
-        message: 'Payment batch must contain between 1 and 100 payment objects.',
+        message:
+          'Payment batch must contain between 1 and 100 payment objects.',
         error: 'Bad Request',
       },
     },
@@ -235,10 +229,19 @@ export class PaymentsController {
     description:
       'Exports filtered payments as a downloadable CSV or PDF file. Supports the same date range and status filters as the list endpoint.',
   })
-  @ApiQuery({ name: 'format', enum: ['csv', 'pdf'], required: true, example: 'csv' })
+  @ApiQuery({
+    name: 'format',
+    enum: ['csv', 'pdf'],
+    required: true,
+    example: 'csv',
+  })
   @ApiQuery({ name: 'from', required: false, example: '2026-01-01T00:00:00Z' })
   @ApiQuery({ name: 'to', required: false, example: '2026-12-31T23:59:59Z' })
-  @ApiQuery({ name: 'status', required: false, description: 'Filter by status' })
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Filter by status',
+  })
   @ApiOkResponse({ description: 'Downloadable CSV or PDF file.' })
   @ApiBadRequestResponse({ description: 'Invalid format or date range.' })
   async exportPayments(
@@ -246,20 +249,28 @@ export class PaymentsController {
     @Res() res: Response,
   ): Promise<void> {
     if (exportDto.from && exportDto.to) {
-      if (new Date(exportDto.from).getTime() > new Date(exportDto.to).getTime()) {
-        throw new BadRequestException('from date must not be greater than to date');
+      if (
+        new Date(exportDto.from).getTime() > new Date(exportDto.to).getTime()
+      ) {
+        throw new BadRequestException(
+          'from date must not be greater than to date',
+        );
       }
     }
 
     const payments = await this.paymentsService.findForExport(exportDto);
 
     if (exportDto.format === 'csv') {
-      const csvHeader = 'id,amount,currency,status,externalReference,description,refundedAmount,cancelledAt,createdAt,updatedAt';
+      const csvHeader =
+        'id,amount,currency,status,externalReference,description,refundedAmount,cancelledAt,createdAt,updatedAt';
       const rows = payments.map(paymentToCsvRow);
       const csv = [csvHeader, ...rows].join('\n');
 
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename="payments.csv"');
+      res.setHeader(
+        'Content-Disposition',
+        'attachment; filename="payments.csv"',
+      );
       res.send(csv);
       return;
     }
@@ -273,6 +284,27 @@ export class PaymentsController {
     doc.pipe(res);
   }
 
+  @Post('merchant-fee-config/:merchantId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Configure merchant fees (admin)' })
+  async upsertMerchantFeeConfig(@Body() dto: UpsertMerchantFeeConfigDto) {
+    return this.paymentsService.upsertMerchantFeeConfig(
+      dto.merchantId ?? '',
+      dto,
+    );
+  }
+
+  @Get('merchant-fee-config/:merchantId/report')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Get merchant fee report (admin)' })
+  async getFeeReport(@Param('merchantId') merchantId: string) {
+    return this.paymentsService.getFeeReport(merchantId);
+  }
+
   @Get()
   @ApiBearerAuth('bearer')
   @ApiOperation({
@@ -283,11 +315,27 @@ export class PaymentsController {
       'When cursor is provided, the response includes nextCursor and hasMore fields for efficient navigation through large datasets. ' +
       'Sortable by created_at (default), amount, or status.',
   })
-  @ApiQuery({ name: 'cursor', required: false, description: 'Cursor for cursor-based pagination (base64-encoded from previous response nextCursor). When provided, page is ignored.' })
-  @ApiQuery({ name: 'sortBy', required: false, enum: PaymentSortBy, description: 'Sort by field (default: created_at)' })
-  @ApiQuery({ name: 'order', required: false, enum: SortOrder, description: 'Sort order (default: DESC)' })
+  @ApiQuery({
+    name: 'cursor',
+    required: false,
+    description:
+      'Cursor for cursor-based pagination (base64-encoded from previous response nextCursor). When provided, page is ignored.',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: PaymentSortBy,
+    description: 'Sort by field (default: created_at)',
+  })
+  @ApiQuery({
+    name: 'order',
+    required: false,
+    enum: SortOrder,
+    description: 'Sort order (default: DESC)',
+  })
   @ApiOkResponse({
-    description: 'Paginated list of payments. Returns CursorPaginatedResult when cursor param is used, otherwise PaginatedResult.',
+    description:
+      'Paginated list of payments. Returns CursorPaginatedResult when cursor param is used, otherwise PaginatedResult.',
     schema: {
       oneOf: [
         {
@@ -307,7 +355,8 @@ export class PaymentsController {
                 updatedAt: '2026-01-26T10:05:00.000Z',
               },
             ],
-            nextCursor: 'Y3JlYXRlZF9hdDoyMDI2LTAxLTI2VDEwOjAwOjAwLjAwMFo6MTIzZTQ1NjctZTg5Yi0xMmQzLWE0NTYtNDI2NjE0MTc0MDAw',
+            nextCursor:
+              'Y3JlYXRlZF9hdDoyMDI2LTAxLTI2VDEwOjAwOjAwLjAwMFo6MTIzZTQ1NjctZTg5Yi0xMmQzLWE0NTYtNDI2NjE0MTc0MDAw',
             hasMore: true,
           },
         },
@@ -405,7 +454,6 @@ export class PaymentsController {
   @UseGuards(WebhookGuard)
   @Post('webhook')
   @HttpCode(HttpStatus.OK)
-
   @ApiOperation({
     summary: 'Handle payment webhook',
     description:
@@ -536,7 +584,8 @@ export class PaymentsController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Payment cannot be refunded (already refunded, pending, or failed).',
+    description:
+      'Payment cannot be refunded (already refunded, pending, or failed).',
     schema: {
       example: {
         statusCode: 409,
@@ -598,7 +647,8 @@ export class PaymentsController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Payment cannot be cancelled (not in PENDING status or already in terminal state).',
+    description:
+      'Payment cannot be cancelled (not in PENDING status or already in terminal state).',
     schema: {
       example: {
         statusCode: 409,
@@ -631,7 +681,8 @@ export class PaymentsController {
   @ApiQuery({
     name: 'token',
     required: false,
-    description: 'JWT bearer token (alternative to Authorization header for browser EventSource clients)',
+    description:
+      'JWT bearer token (alternative to Authorization header for browser EventSource clients)',
   })
   @ApiBearerAuth('bearer')
   @ApiOkResponse({
@@ -653,4 +704,3 @@ export class PaymentsController {
     return this.paymentSseService.subscribe(id);
   }
 }
-

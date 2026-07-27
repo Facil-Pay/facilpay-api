@@ -50,6 +50,7 @@ import { SecurityHeadersMiddleware } from './common/middleware/security-headers.
     NotificationsModule,
     RatesModule,
     MerchantsModule,
+    OnboardingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,17 +1,34 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  BadRequestException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, LessThanOrEqual, Repository, SelectQueryBuilder } from 'typeorm';
+import {
+  DataSource,
+  LessThanOrEqual,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
 import { PaymentSplit, PaymentSplitStatus } from './payment-split.entity';
+import { MerchantFeeConfig } from './merchant-fee-config.entity';
+import { UpsertMerchantFeeConfigDto } from './dto/upsert-merchant-fee-config.dto';
+import { PaymentFeeReportDto } from './dto/payment-fee-report.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
-import { CursorPaginatedResult, PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import {
+  CursorPaginatedResult,
+  PaginatedResult,
+} from '../../common/interfaces/paginated-result.interface';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { PaymentSseService } from './payment-sse.service';
@@ -30,6 +47,8 @@ export class PaymentsService {
     private readonly paymentRepository: Repository<Payment>,
     @InjectRepository(Refund)
     private readonly refundRepository: Repository<Refund>,
+    @InjectRepository(MerchantFeeConfig)
+    private readonly merchantFeeConfigRepository: Repository<MerchantFeeConfig>,
     @InjectRepository(PaymentSplit)
     private readonly paymentSplitRepository: Repository<PaymentSplit>,
     private readonly dataSource: DataSource,
@@ -41,6 +60,128 @@ export class PaymentsService {
     private readonly stellarService: StellarService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
+  }
+
+  private async ensurePaymentLimits(dto: CreatePaymentDto): Promise<void> {
+    const amount = Number(dto.amount);
+    const min = Number(
+      this.configService.get<string>('PAYMENT_MIN_AMOUNT', '0'),
+    );
+    const max = Number(
+      this.configService.get<string>('PAYMENT_MAX_AMOUNT', '0'),
+    );
+    const dailyLimit = Number(
+      this.configService.get<string>('PAYMENT_DAILY_LIMIT_PER_USER', '0'),
+    );
+
+    if (min && amount < min) {
+      throw new UnprocessableEntityException(
+        `Payment amount ${amount} is below the minimum allowed amount of ${min}`,
+      );
+    }
+    if (max && amount > max) {
+      throw new UnprocessableEntityException(
+        `Payment amount ${amount} exceeds the maximum allowed amount of ${max}`,
+      );
+    }
+
+    if (!dailyLimit) return;
+
+    const userKey =
+      dto.payerEmail ?? dto.merchantEmail ?? dto.merchantId ?? 'anonymous';
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const end = new Date();
+    end.setHours(23, 59, 59, 999);
+
+    const { sum } = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .select('COALESCE(SUM(payment.amount), 0)', 'sum')
+      .where('payment.createdAt >= :start', { start })
+      .andWhere('payment.createdAt <= :end', { end })
+      .andWhere(
+        '(payment.payerEmail = :userKey OR payment.merchantEmail = :userKey OR payment.merchantId = :userKey)',
+        { userKey },
+      )
+      .getRawOne();
+
+    if (Number(sum) + amount > dailyLimit) {
+      throw new UnprocessableEntityException(
+        `Payment amount ${amount} would exceed the daily limit of ${dailyLimit} for ${userKey}`,
+      );
+    }
+  }
+
+  private async calculateFee(
+    merchantId: string | undefined,
+    amount: number,
+  ): Promise<{ feeAmount: number; netAmount: number; feeBreakdown: string }> {
+    if (!merchantId) {
+      return {
+        feeAmount: 0,
+        netAmount: Number(amount.toFixed(2)),
+        feeBreakdown: 'no-fee-config',
+      };
+    }
+
+    const config = await this.merchantFeeConfigRepository.findOneBy({
+      merchantId,
+    });
+    if (!config) {
+      return {
+        feeAmount: 0,
+        netAmount: Number(amount.toFixed(2)),
+        feeBreakdown: 'no-fee-config',
+      };
+    }
+
+    const flatFee = Number(config.flatFee ?? 0);
+    const percentageFee = Number(config.percentageFee ?? 0);
+    const minFee = Number(config.minFee ?? 0);
+    const percentageValue = (amount * percentageFee) / 100;
+    const feeAmount = Math.max(flatFee + percentageValue, minFee);
+    return {
+      feeAmount: Number(feeAmount.toFixed(2)),
+      netAmount: Number(Math.max(0, amount - feeAmount).toFixed(2)),
+      feeBreakdown: `flat:${flatFee};percentage:${percentageFee}%;min:${minFee}`,
+    };
+  }
+
+  async upsertMerchantFeeConfig(
+    merchantId: string,
+    dto: UpsertMerchantFeeConfigDto,
+  ): Promise<MerchantFeeConfig> {
+    let config = await this.merchantFeeConfigRepository.findOneBy({
+      merchantId,
+    });
+    if (!config) {
+      config = this.merchantFeeConfigRepository.create({ merchantId });
+    }
+    if (dto.flatFee !== undefined) config.flatFee = dto.flatFee;
+    if (dto.percentageFee !== undefined)
+      config.percentageFee = dto.percentageFee;
+    if (dto.minFee !== undefined) config.minFee = dto.minFee;
+    return this.merchantFeeConfigRepository.save(config);
+  }
+
+  async getFeeReport(merchantId: string): Promise<PaymentFeeReportDto> {
+    const payments = await this.paymentRepository.find({
+      where: { merchantId },
+    });
+    const totalGrossAmount = payments.reduce(
+      (sum, payment) => sum + Number(payment.amount || 0),
+      0,
+    );
+    const totalFeeAmount = payments.reduce(
+      (sum, payment) => sum + Number(payment.feeAmount || 0),
+      0,
+    );
+    return {
+      merchantId,
+      totalGrossAmount: Number(totalGrossAmount.toFixed(2)),
+      totalFeeAmount: Number(totalFeeAmount.toFixed(2)),
+      totalNetAmount: Number((totalGrossAmount - totalFeeAmount).toFixed(2)),
+    };
   }
 
   /**
@@ -61,6 +202,11 @@ export class PaymentsService {
         `Starting payment creation transaction for amount: ${createPaymentDto.amount}`,
       );
 
+      await this.ensurePaymentLimits(createPaymentDto);
+      const fee = await this.calculateFee(
+        createPaymentDto.merchantId,
+        Number(createPaymentDto.amount),
+      );
       const expiresInSeconds =
         createPaymentDto.expiresIn ?? this.getDefaultExpirySeconds();
 
@@ -68,6 +214,9 @@ export class PaymentsService {
         ...createPaymentDto,
         merchantEmail: createPaymentDto.merchantEmail || null,
         payerEmail: createPaymentDto.payerEmail || null,
+        feeAmount: fee.feeAmount,
+        netAmount: fee.netAmount,
+        feeBreakdown: fee.feeBreakdown,
         status: PaymentStatus.PENDING,
         expiresAt: new Date(Date.now() + expiresInSeconds * 1000),
       });
@@ -81,7 +230,9 @@ export class PaymentsService {
             recipientAddress: split.recipientAddress,
             percentage: split.percentage,
             amount: Number(
-              ((Number(savedPayment.amount) * split.percentage) / 100).toFixed(2),
+              ((Number(savedPayment.amount) * split.percentage) / 100).toFixed(
+                2,
+              ),
             ),
             status: PaymentSplitStatus.PENDING,
           }),
@@ -121,7 +272,29 @@ export class PaymentsService {
         } items.`,
       );
 
-      const payments = createPaymentDtos.map((createPaymentDto) =>
+      const paymentPayloads = await Promise.all(
+        createPaymentDtos.map(async (createPaymentDto) => {
+          await this.ensurePaymentLimits(createPaymentDto);
+          const fee = await this.calculateFee(
+            createPaymentDto.merchantId,
+            Number(createPaymentDto.amount),
+          );
+          return {
+            ...createPaymentDto,
+            feeAmount: fee.feeAmount,
+            netAmount: fee.netAmount,
+            feeBreakdown: fee.feeBreakdown,
+            status: PaymentStatus.PENDING,
+            expiresAt: new Date(
+              Date.now() +
+                (createPaymentDto.expiresIn ?? this.getDefaultExpirySeconds()) *
+                  1000,
+            ),
+          };
+        }),
+      );
+
+      const payments = paymentPayloads.map((createPaymentDto) =>
         queryRunner.manager.create(Payment, {
           ...createPaymentDto,
           status: PaymentStatus.PENDING,
@@ -168,7 +341,9 @@ export class PaymentsService {
     return this.findWithOffset(getPaymentsDto);
   }
 
-  private async findWithOffset(dto: GetPaymentsDto): Promise<PaginatedResult<Payment>> {
+  private async findWithOffset(
+    dto: GetPaymentsDto,
+  ): Promise<PaginatedResult<Payment>> {
     const query = this.buildFilterQuery(dto);
 
     const page = dto.page || 1;
@@ -183,7 +358,9 @@ export class PaymentsService {
     return { data, total, page, limit };
   }
 
-  private async findWithCursor(dto: GetPaymentsDto): Promise<CursorPaginatedResult<Payment>> {
+  private async findWithCursor(
+    dto: GetPaymentsDto,
+  ): Promise<CursorPaginatedResult<Payment>> {
     const decoded = this.decodeCursor(dto.cursor!);
     const limit = dto.limit || 20;
     const order = dto.order || SortOrder.DESC;
@@ -219,15 +396,21 @@ export class PaymentsService {
     }
 
     if (dto.currency) {
-      query.andWhere('payment.currency = :currency', { currency: dto.currency });
+      query.andWhere('payment.currency = :currency', {
+        currency: dto.currency,
+      });
     }
 
     if (dto.minAmount !== undefined) {
-      query.andWhere('payment.amount >= :minAmount', { minAmount: dto.minAmount });
+      query.andWhere('payment.amount >= :minAmount', {
+        minAmount: dto.minAmount,
+      });
     }
 
     if (dto.maxAmount !== undefined) {
-      query.andWhere('payment.amount <= :maxAmount', { maxAmount: dto.maxAmount });
+      query.andWhere('payment.amount <= :maxAmount', {
+        maxAmount: dto.maxAmount,
+      });
     }
 
     if (dto.from) {
@@ -258,7 +441,10 @@ export class PaymentsService {
     return query;
   }
 
-  private applyOrder(query: SelectQueryBuilder<Payment>, dto: GetPaymentsDto): void {
+  private applyOrder(
+    query: SelectQueryBuilder<Payment>,
+    dto: GetPaymentsDto,
+  ): void {
     const sortBy = dto.sortBy || PaymentSortBy.CREATED_AT;
     const order = dto.order || SortOrder.DESC;
 
@@ -335,7 +521,11 @@ export class PaymentsService {
     return Buffer.from(raw, 'utf-8').toString('base64');
   }
 
-  private decodeCursor(cursor: string): { sortField: string; sortValue: string; paymentId: string } {
+  private decodeCursor(cursor: string): {
+    sortField: string;
+    sortValue: string;
+    paymentId: string;
+  } {
     let decoded: string;
     try {
       decoded = Buffer.from(cursor, 'base64').toString('utf-8');
@@ -431,7 +621,8 @@ export class PaymentsService {
 
       const savedRefund = await queryRunner.manager.save(refund);
 
-      payment.refundedAmount = Number(payment.refundedAmount || 0) + refundAmount;
+      payment.refundedAmount =
+        Number(payment.refundedAmount || 0) + refundAmount;
 
       if (payment.refundedAmount >= Number(payment.amount)) {
         payment.status = PaymentStatus.REFUNDED;
@@ -523,13 +714,19 @@ export class PaymentsService {
       query.andWhere('payment.status = :status', { status: dto.status });
     }
     if (dto.currency) {
-      query.andWhere('payment.currency = :currency', { currency: dto.currency });
+      query.andWhere('payment.currency = :currency', {
+        currency: dto.currency,
+      });
     }
     if (dto.minAmount !== undefined) {
-      query.andWhere('payment.amount >= :minAmount', { minAmount: dto.minAmount });
+      query.andWhere('payment.amount >= :minAmount', {
+        minAmount: dto.minAmount,
+      });
     }
     if (dto.maxAmount !== undefined) {
-      query.andWhere('payment.amount <= :maxAmount', { maxAmount: dto.maxAmount });
+      query.andWhere('payment.amount <= :maxAmount', {
+        maxAmount: dto.maxAmount,
+      });
     }
     if (dto.from) {
       query.andWhere('payment.createdAt >= :fromDate', { fromDate: dto.from });
@@ -634,7 +831,9 @@ export class PaymentsService {
           currency: updatedPayment.currency,
           expiredAt: updatedPayment.expiredAt,
         })
-        .catch((e) => this.logger.error('Failed to dispatch payment.expired webhook', e));
+        .catch((e) =>
+          this.logger.error('Failed to dispatch payment.expired webhook', e),
+        );
     }
   }
 
@@ -685,66 +884,86 @@ export class PaymentsService {
 
     if (payment.merchantId) {
       await this.webhooksService
-        .dispatchEventToMerchant(payment.merchantId, 'payment.split_processed', {
-          paymentId: payment.id,
-          totalSplits: splits.length,
-          failedSplits: failedCount,
-          status: payment.status,
-        })
+        .dispatchEventToMerchant(
+          payment.merchantId,
+          'payment.split_processed',
+          {
+            paymentId: payment.id,
+            totalSplits: splits.length,
+            failedSplits: failedCount,
+            status: payment.status,
+          },
+        )
         .catch((e) =>
-          this.logger.error('Failed to dispatch payment.split_processed webhook', e),
+          this.logger.error(
+            'Failed to dispatch payment.split_processed webhook',
+            e,
+          ),
         );
     }
   }
 
-  private async sendPaymentConfirmedNotifications(payment: Payment): Promise<void> {
+  private async sendPaymentConfirmedNotifications(
+    payment: Payment,
+  ): Promise<void> {
     if (payment.merchantEmail) {
-      await this.emailNotificationService.sendMerchantPaymentReceived(
-        payment.merchantEmail,
-        null,
-        payment.id,
-        String(payment.amount),
-        payment.currency,
-        payment.description,
-      ).catch(() => {});
+      await this.emailNotificationService
+        .sendMerchantPaymentReceived(
+          payment.merchantEmail,
+          null,
+          payment.id,
+          String(payment.amount),
+          payment.currency,
+          payment.description,
+        )
+        .catch(() => {});
     }
 
     if (payment.payerEmail) {
-      await this.emailNotificationService.sendPayerPaymentConfirmed(
-        payment.payerEmail,
-        null,
-        payment.id,
-        String(payment.amount),
-        payment.currency,
-        payment.description,
-      ).catch(() => {});
+      await this.emailNotificationService
+        .sendPayerPaymentConfirmed(
+          payment.payerEmail,
+          null,
+          payment.id,
+          String(payment.amount),
+          payment.currency,
+          payment.description,
+        )
+        .catch(() => {});
     }
   }
 
-  private async sendRefundNotifications(payment: Payment, refund: Refund): Promise<void> {
+  private async sendRefundNotifications(
+    payment: Payment,
+    refund: Refund,
+  ): Promise<void> {
     if (payment.merchantEmail) {
-      await this.emailNotificationService.sendMerchantRefundIssued(
-        payment.merchantEmail,
-        null,
-        payment.id,
-        refund.id,
-        String(refund.amount),
-        String(payment.amount),
-        payment.currency,
-        refund.reason,
-      ).catch(() => {});
+      await this.emailNotificationService
+        .sendMerchantRefundIssued(
+          payment.merchantEmail,
+          null,
+          payment.id,
+          refund.id,
+          String(refund.amount),
+          String(payment.amount),
+          payment.currency,
+          refund.reason,
+        )
+        .catch(() => {});
     }
 
     if (payment.payerEmail) {
-      await this.emailNotificationService.sendPayerRefundProcessed(
-        payment.payerEmail,
-        null,
-        payment.id,
-        refund.id,
-        String(refund.amount),
-        payment.currency,
-        refund.reason,
-      ).catch(() => {});
+      await this.emailNotificationService
+        .sendPayerRefundProcessed(
+          payment.payerEmail,
+          null,
+          payment.id,
+          refund.id,
+          String(refund.amount),
+          payment.currency,
+          refund.reason,
+        )
+        .catch(() => {});
     }
   }
 }
