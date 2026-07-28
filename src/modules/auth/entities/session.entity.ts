@@ -6,21 +6,26 @@ import {
   Index,
 } from 'typeorm';
 
-@Entity('refresh_tokens')
-export class RefreshToken {
+@Entity('sessions')
+export class Session {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index('IDX_refresh_tokens_token')
-  @Column({ unique: true })
-  token: string;
-
+  @Index()
   @Column()
   userId: string;
 
-  @Index('IDX_refresh_tokens_sessionId')
   @Column({ nullable: true })
-  sessionId: string | null;
+  deviceInfo: string | null;
+
+  @Column({ nullable: true })
+  ipAddress: string | null;
+
+  @Column({ nullable: true, length: 512 })
+  userAgent: string | null;
+
+  @Column({ type: 'timestamp with time zone' })
+  lastActiveAt: Date;
 
   @Column({ type: 'timestamp with time zone' })
   expiresAt: Date;

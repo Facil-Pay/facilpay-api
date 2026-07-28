@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
@@ -77,6 +78,24 @@ export class ApiKeysController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
   async findAll(@CurrentUser() user: User): Promise<ApiKey[]> {
     return this.apiKeysService.findAllForUser(user.id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary: "Update an API key's name and/or scope",
+    description:
+      'Updates the name and/or scope of an existing API key without regenerating its secret. Scope changes take effect immediately for subsequent requests.',
+  })
+  @ApiBody({ type: UpdateApiKeyDto })
+  @ApiOkResponse({ description: 'API key updated.', type: ApiKey })
+  @ApiNotFoundResponse({ description: 'API key not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
+  async update(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Body() dto: UpdateApiKeyDto,
+  ): Promise<ApiKey> {
+    return this.apiKeysService.update(id, user.id, dto);
   }
 
   @Delete(':id')

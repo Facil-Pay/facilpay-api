@@ -51,6 +51,20 @@ export class ApiKeysService {
     });
   }
 
+  async update(id: string, userId: string, dto: UpdateApiKeyDto): Promise<ApiKey> {
+    const key = await this.apiKeyRepository.findOne({ where: { id, userId } });
+    if (!key) {
+      throw new NotFoundException(`API key with ID ${id} not found`);
+    }
+    if (dto.name !== undefined) {
+      key.name = dto.name;
+    }
+    if (dto.scope !== undefined) {
+      key.scope = dto.scope;
+    }
+    return this.apiKeyRepository.save(key);
+  }
+
   async revoke(id: string, userId: string): Promise<void> {
     const key = await this.apiKeyRepository.findOne({ where: { id, userId } });
     if (!key) {
