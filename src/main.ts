@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppLogger } from './modules/logger/logger.service';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, UnprocessableEntityException } from '@nestjs/common';
 import { CorsConfigService } from './modules/cors/cors-config.service';
 
 async function bootstrap() {
@@ -14,11 +14,17 @@ async function bootstrap() {
   // Configure global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // Strip properties that don't have decorators
-      transform: true, // Transform payloads to DTO instances
-      forbidNonWhitelisted: true, // Throw error if non-whitelisted properties are present
-      transformOptions: {
-        enableImplicitConversion: true, // Enable implicit type conversion
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: true,
+      transformOptions: { enableImplicitConversion: true },
+      exceptionFactory: (errors) => {
+        const messages = errors.flatMap((e) =>
+          e.constraints ? Object.values(e.constraints) : [],
+        );
+        return new UnprocessableEntityException(
+          messages.length ? messages : 'Validation failed',
+        );
       },
     }),
   );
