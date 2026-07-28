@@ -24,6 +24,9 @@ export class User {
   @Column('text', { array: true, default: [UserRole.USER] })
   roles: UserRole[] = [UserRole.USER];
 
+  @Column({ nullable: true })
+  roleId: string | null = null;
+
   @Column({ default: false })
   isEmailVerified: boolean = false;
 

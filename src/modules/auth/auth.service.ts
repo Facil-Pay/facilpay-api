@@ -33,8 +33,10 @@ import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { Role } from './entities/role.entity';
 import { MailService } from './mail/mail.service';
 import { PasswordStrengthService } from './password-strength.service';
+import { CreateRoleDto } from './dto/create-role.dto';
 
 @Injectable()
 export class AuthService {
@@ -54,6 +56,8 @@ export class AuthService {
     private refreshTokenRepository: Repository<RefreshToken>,
     @InjectRepository(PasswordResetToken)
     private passwordResetTokenRepository: Repository<PasswordResetToken>,
+    @InjectRepository(Role)
+    private roleRepository: Repository<Role>,
     appLogger: AppLogger,
   ) {
     this.logger = appLogger.child({ module: AuthService.name });
@@ -581,5 +585,30 @@ export class AuthService {
     );
 
     return { message: 'Password reset successful. Please log in again.' };
+  }
+
+  async createRole(dto: CreateRoleDto): Promise<Role> {
+    const existing = await this.roleRepository.findOne({ where: { name: dto.name } });
+    if (existing) {
+      throw new BadRequestException('Role with this name already exists');
+    }
+
+    const role = this.roleRepository.create(dto);
+    return this.roleRepository.save(role);
+  }
+
+  async assignRole(userId: string, roleId: string): Promise<User> {
+    const user = await this.usersService.findOne(userId);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    const role = await this.roleRepository.findOne({ where: { id: roleId } });
+    if (!role) {
+      throw new BadRequestException('Role not found');
+    }
+
+    user.roleId = roleId;
+    return this.usersService.updateUser(userId, user);
   }
 }
