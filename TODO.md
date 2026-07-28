@@ -8,11 +8,11 @@
   - optional allowlist constraint based on env (`SUPPORTED_CURRENCIES`)
 - [x] Step 3: Update `CreatePaymentDto` to use the new validator for `currency`
 
-- [ ] Step 4: Ensure unsupported/invalid currencies return HTTP **422** with descriptive error message
+- [x] Step 4: Ensure unsupported/invalid currencies return HTTP **422** with descriptive error message
 
-- [ ] Step 5: Add `GET /v1/currencies` endpoint that returns the supported currency list from env
-- [ ] Step 6: Update Swagger decorators/examples for the new endpoint and DTO
-- [ ] Step 7: Update/extend e2e tests (`test/payments.e2e-spec.ts`) for:
+- [x] Step 5: Add `GET /v1/currencies` endpoint that returns the supported currency list from env
+- [x] Step 6: Update Swagger decorators/examples for the new endpoint and DTO
+- [x] Step 7: Update/extend e2e tests (`test/payments.e2e-spec.ts`) for:
   - invalid ISO currency -> 422
   - valid but unsupported currency -> 422
   - GET /v1/currencies -> returns current env list

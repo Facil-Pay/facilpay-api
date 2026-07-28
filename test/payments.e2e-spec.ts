@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { INestApplication, ValidationPipe, UnprocessableEntityException } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import * as crypto from 'crypto';
@@ -30,6 +30,14 @@ describe('PaymentsModule (e2e)', () => {
         transform: true,
         forbidNonWhitelisted: true,
         transformOptions: { enableImplicitConversion: true },
+        exceptionFactory: (errors) => {
+          const messages = errors.flatMap((e) =>
+            e.constraints ? Object.values(e.constraints) : [],
+          );
+          return new UnprocessableEntityException(
+            messages.length ? messages : 'Validation failed',
+          );
+        },
       }),
     );
     await app.init();
@@ -54,34 +62,62 @@ describe('PaymentsModule (e2e)', () => {
       paymentId = response.body.id;
     });
 
-    it('returns 400 when amount is missing', async () => {
+    it('returns 422 when amount is missing', async () => {
       const response = await request(app.getHttpServer())
         .post('/v1/payments')
         .send({ currency: 'USD' })
-        .expect(400);
+        .expect(422);
 
-      expect(response.body.statusCode).toBe(400);
+      expect(response.body.statusCode).toBe(422);
     });
 
-    it('returns 400 when amount is zero', async () => {
+    it('returns 422 when amount is zero', async () => {
       await request(app.getHttpServer())
         .post('/v1/payments')
         .send({ amount: 0, currency: 'USD' })
-        .expect(400);
+        .expect(422);
     });
 
-    it('returns 400 when currency is missing', async () => {
+    it('returns 422 when currency is missing', async () => {
       await request(app.getHttpServer())
         .post('/v1/payments')
         .send({ amount: 10 })
-        .expect(400);
+        .expect(422);
     });
 
-    it('returns 400 when currency exceeds 3 characters', async () => {
+    it('returns 422 when currency exceeds 3 characters', async () => {
       await request(app.getHttpServer())
         .post('/v1/payments')
         .send({ amount: 10, currency: 'USDD' })
-        .expect(400);
+        .expect(422);
+    });
+
+    it('returns 422 when currency is not a valid ISO 4217 code', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/v1/payments')
+        .send({ amount: 10, currency: 'XYZ' })
+        .expect(422);
+
+      expect(response.body.statusCode).toBe(422);
+      expect(response.body.message).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('not a valid ISO 4217'),
+        ]),
+      );
+    });
+
+    it('returns 422 when currency is valid ISO 4217 but not supported', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/v1/payments')
+        .send({ amount: 10, currency: 'JPY' })
+        .expect(422);
+
+      expect(response.body.statusCode).toBe(422);
+      expect(response.body.message).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('is not supported'),
+        ]),
+      );
     });
   });
 
@@ -186,6 +222,30 @@ describe('PaymentsModule (e2e)', () => {
         .set('X-Signature', signature)
         .send(body)
         .expect(404);
+    });
+  });
+
+  // ── GET /v1/currencies ────────────────────────────────────────────────────────
+
+  describe('GET /v1/currencies', () => {
+    it('returns 200 with the supported currency list from env', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/v1/currencies')
+        .expect(200);
+
+      expect(response.body).toHaveProperty('currencies');
+      expect(Array.isArray(response.body.currencies)).toBe(true);
+
+      const codes = response.body.currencies.map((c: { code: string }) => c.code);
+      expect(codes).toContain('USD');
+      expect(codes).toContain('EUR');
+      expect(codes).toContain('GBP');
+
+      for (const currency of response.body.currencies) {
+        expect(currency).toHaveProperty('code');
+        expect(currency).toHaveProperty('name');
+        expect(currency).toHaveProperty('symbol');
+      }
     });
   });
 });

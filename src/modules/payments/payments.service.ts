@@ -617,6 +617,7 @@ export class PaymentsService {
         paymentId: id,
         amount: refundAmount,
         reason: refundDto.reason,
+        initiatedBy: refundDto.initiatedBy ?? null,
       });
 
       const savedRefund = await queryRunner.manager.save(refund);

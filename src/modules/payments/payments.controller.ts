@@ -64,6 +64,9 @@ import {
 import { WebhookGuard } from './webhook.guard';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
 import { UpsertMerchantFeeConfigDto } from './dto/upsert-merchant-fee-config.dto';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '../../common/constants/roles';
 
 @ApiTags('payments')
 @Controller('v1/payments')

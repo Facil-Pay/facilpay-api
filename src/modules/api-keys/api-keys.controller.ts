@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -21,6 +22,7 @@ import {
 } from '@nestjs/swagger';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 import { ApiKey } from './api-key.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -88,5 +90,51 @@ export class ApiKeysController {
     @CurrentUser() user: User,
   ): Promise<void> {
     return this.apiKeysService.revoke(id, user.id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Rename or change an API key\'s scope' })
+  @ApiOkResponse({ description: 'API key updated.', type: ApiKey })
+  @ApiNotFoundResponse({ description: 'API key not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
+  async update(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Body() dto: UpdateApiKeyDto,
+  ): Promise<ApiKey> {
+    return this.apiKeysService.update(id, user.id, dto);
+  }
+
+  @Post(':id/rotate')
+  @ApiOperation({
+    summary: 'Rotate an API key\'s secret',
+    description: 'Deactivates the current key and generates a new one with the same name, scope, and environment. The new plaintext key is returned only once.',
+  })
+  @ApiCreatedResponse({
+    description: 'New API key generated. Plaintext shown only once.',
+    schema: {
+      example: {
+        apiKey: {
+          id: 'new-uuid',
+          name: 'My integration',
+          keyPrefix: 'fp_live_xxxx',
+          scope: 'read',
+          environment: 'live',
+          expiresAt: null,
+          lastUsedAt: null,
+          isActive: true,
+          createdAt: '2026-07-28T10:00:00.000Z',
+        },
+        plaintext: 'fp_live_newtoken...',
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'API key not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
+  async rotate(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<{ apiKey: ApiKey; plaintext: string }> {
+    return this.apiKeysService.rotate(id, user.id);
   }
 }
