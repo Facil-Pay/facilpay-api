@@ -82,9 +82,9 @@ export class ApiKeysController {
 
   @Patch(':id')
   @ApiOperation({
-    summary: "Update an API key's name and/or scope",
+    summary: "Update an API key's name, scope, and/or rate limit override",
     description:
-      'Updates the name and/or scope of an existing API key without regenerating its secret. Scope changes take effect immediately for subsequent requests.',
+      'Updates the name, scope, and/or custom rate limit of an existing API key without regenerating its secret. Changes take effect immediately for subsequent requests.',
   })
   @ApiBody({ type: UpdateApiKeyDto })
   @ApiOkResponse({ description: 'API key updated.', type: ApiKey })
@@ -109,19 +109,6 @@ export class ApiKeysController {
     @CurrentUser() user: User,
   ): Promise<void> {
     return this.apiKeysService.revoke(id, user.id);
-  }
-
-  @Patch(':id')
-  @ApiOperation({ summary: 'Rename or change an API key\'s scope' })
-  @ApiOkResponse({ description: 'API key updated.', type: ApiKey })
-  @ApiNotFoundResponse({ description: 'API key not found.' })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
-  async update(
-    @Param('id') id: string,
-    @CurrentUser() user: User,
-    @Body() dto: UpdateApiKeyDto,
-  ): Promise<ApiKey> {
-    return this.apiKeysService.update(id, user.id, dto);
   }
 
   @Post(':id/rotate')

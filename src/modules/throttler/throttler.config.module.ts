@@ -31,9 +31,10 @@ import { UsersModule } from '../users/users.module';
     UsersModule,
   ],
   providers: [
+    MerchantThrottlerGuard,
     {
       provide: APP_GUARD,
-      useClass: MerchantThrottlerGuard,
+      useExisting: MerchantThrottlerGuard,
     },
   ],
   exports: [MerchantThrottlerGuard],

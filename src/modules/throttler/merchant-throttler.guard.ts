@@ -1,89 +1,84 @@
+import { Injectable } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-} from '@nestjs/common';
-import { ThrottlerGuard } from '@nestjs/throttler';
-import { ThrottlerStorage } from '@nestjs/throttler/dist/throttler-storage.interface';
+  InjectThrottlerOptions,
+  InjectThrottlerStorage,
+  ThrottlerGuard,
+} from '@nestjs/throttler';
+import type {
+  ThrottlerModuleOptions,
+  ThrottlerRequest,
+  ThrottlerStorage,
+} from '@nestjs/throttler';
 import { UsersService } from '../users/users.service';
+
+interface RateLimitOverride {
+  limit: number;
+  ttl: number;
+}
 
 @Injectable()
 export class MerchantThrottlerGuard extends ThrottlerGuard {
-  private readonly storage: ThrottlerStorage;
-
   constructor(
-    storage: ThrottlerStorage,
+    @InjectThrottlerOptions() options: ThrottlerModuleOptions,
+    @InjectThrottlerStorage() storageService: ThrottlerStorage,
+    reflector: Reflector,
     private readonly usersService: UsersService,
   ) {
-    super(storage);
-    this.storage = storage;
+    super(options, storageService, reflector);
   }
 
-  async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
-    
-    // Extract merchant/user identifier from request
-    // Priority: API key user > JWT user
-    let userId: string | undefined;
-    
-    if (request.apiKey?.userId) {
-      userId = request.apiKey.userId;
-    } else if (request.user?.id) {
-      userId = request.user.id;
-    }
-
-    // If we have a user, check for custom rate limits
-    if (userId) {
-      try {
-        const user = await this.usersService.findOne(userId);
-        
-        // If user has custom rate limits enabled, use them
-        if (user?.rateLimitEnabled && user.rateLimitLimit && user.rateLimitTtl) {
-          // Store the merchant-specific limits in the request for later use
-          request.merchantRateLimit = {
-            limit: user.rateLimitLimit,
-            ttl: user.rateLimitTtl,
-          };
-        }
-      } catch (error) {
-        // If we can't fetch user config, fall back to global defaults
-        // Log but don't fail the request
-        console.warn(`Failed to fetch rate limit config for user ${userId}:`, error);
+  protected async handleRequest(
+    requestProps: ThrottlerRequest,
+  ): Promise<boolean> {
+    // Overrides only apply to the general-purpose 'default' throttler bucket;
+    // dedicated buckets (auth, webhook, bulk) keep their fixed limits.
+    if (requestProps.throttler.name === 'default') {
+      const { req } = this.getRequestResponse(requestProps.context);
+      const override = await this.resolveRateLimitOverride(req);
+      if (override) {
+        return super.handleRequest({
+          ...requestProps,
+          limit: override.limit,
+          ttl: override.ttl,
+        });
       }
     }
 
-    // Proceed with standard throttler guard logic
-    return super.canActivate(context);
+    return super.handleRequest(requestProps);
   }
 
-  protected async resolveRequestTimeout(
-    context: ExecutionContext,
-    handler: Function,
-  ): Promise<number> {
-    const request = context.switchToHttp().getRequest();
-    
-    // If merchant has custom rate limits, use their TTL
-    if (request.merchantRateLimit?.ttl) {
-      return request.merchantRateLimit.ttl;
-    }
-    
-    // Otherwise use default from throttler config
-    return super.resolveRequestTimeout(context, handler);
-  }
-
-  protected async getTracker(
+  private async resolveRateLimitOverride(
     req: any,
-    limiter: { ttl: number; limit: number },
-  ): Promise<{ totalHits: number; resetTime: Date }> {
-    // If merchant has custom rate limits, use their limit
-    if (req.merchantRateLimit?.limit) {
-      const customLimiter = {
-        ttl: req.merchantRateLimit.ttl || limiter.ttl,
-        limit: req.merchantRateLimit.limit,
+  ): Promise<RateLimitOverride | null> {
+    // A per-API-key rate limit override takes precedence over everything else.
+    if (req.apiKey?.rateLimitLimit) {
+      return {
+        limit: req.apiKey.rateLimitLimit,
+        ttl: req.apiKey.rateLimitTtl || this.getDefaultTtl(),
       };
-      return super.getTracker(req, customLimiter);
     }
-    
-    return super.getTracker(req, limiter);
+
+    const userId = req.apiKey?.userId ?? req.user?.id;
+    if (!userId) {
+      return null;
+    }
+
+    try {
+      const user = await this.usersService.findOne(userId);
+      if (user?.rateLimitEnabled && user.rateLimitLimit && user.rateLimitTtl) {
+        return { limit: user.rateLimitLimit, ttl: user.rateLimitTtl };
+      }
+    } catch (error) {
+      // If we can't fetch user config, fall back to global defaults
+      console.warn(`Failed to fetch rate limit config for user ${userId}:`, error);
+    }
+
+    return null;
+  }
+
+  private getDefaultTtl(): number {
+    const defaultThrottler = this.throttlers.find((t) => t.name === 'default');
+    return Number(defaultThrottler?.ttl ?? 60000);
   }
 }

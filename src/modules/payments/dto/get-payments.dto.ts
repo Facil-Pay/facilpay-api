@@ -90,7 +90,7 @@ export class GetPaymentsDto extends PaginationDto {
   })
   @IsString()
   @IsOptional()
-  search?: string;
+  declare search?: string;
 
   @ApiPropertyOptional({
     description: 'Filter by metadata key-value pair, e.g. metadata[orderId]=order_123',

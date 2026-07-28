@@ -1,17 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { AppModule } from '../src/app.module';
+import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { DataSource } from 'typeorm';
 
 describe('Refunds (e2e)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
+  const authToken = 'test-token';
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate: (context: any) => {
+          const request = context.switchToHttp().getRequest();
+          request.user = { id: 'test-admin-id', email: 'admin@example.com' };
+          return true;
+        },
+      })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
@@ -42,12 +53,14 @@ describe('Refunds (e2e)', () => {
 
     const refundResponse = await request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({})
       .expect(201);
 
     expect(refundResponse.body.payment.status).toBe('REFUNDED');
     expect(refundResponse.body.payment.refundedAmount).toBe('100.00');
     expect(refundResponse.body.refund.amount).toBe('100.00');
+    expect(refundResponse.body.refund.initiatedBy).toBe('test-admin-id');
   });
 
   it('should process partial refund', async () => {
@@ -63,6 +76,7 @@ describe('Refunds (e2e)', () => {
 
     const refundResponse = await request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 50, reason: 'Partial refund requested' })
       .expect(201);
 
@@ -79,6 +93,7 @@ describe('Refunds (e2e)', () => {
 
     return request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({})
       .expect(409)
       .expect((res) => {
@@ -99,11 +114,13 @@ describe('Refunds (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({})
       .expect(201);
 
     return request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({})
       .expect(409)
       .expect((res) => {
@@ -124,11 +141,13 @@ describe('Refunds (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 60 })
       .expect(201);
 
     return request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 50 })
       .expect(409)
       .expect((res) => {
@@ -149,11 +168,13 @@ describe('Refunds (e2e)', () => {
 
     await request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 30 })
       .expect(201);
 
     await request(app.getHttpServer())
       .post(`/payments/${payment.body.id}/refund`)
+      .set('Authorization', `Bearer ${authToken}`)
       .send({ amount: 20 })
       .expect(201);
 
@@ -164,5 +185,6 @@ describe('Refunds (e2e)', () => {
     expect(getResponse.body.refunds).toHaveLength(2);
     expect(getResponse.body.refunds[0].amount).toBe('20.00');
     expect(getResponse.body.refunds[1].amount).toBe('30.00');
+    expect(getResponse.body.refunds[0].initiatedBy).toBe('test-admin-id');
   });
 });
