@@ -24,10 +24,14 @@ import { DisableTwoFactorDto } from './dto/disable-two-factor.dto';
 import { AuthThrottle } from '../throttler/throttler.decorator';
 import { Public } from './decorators/public.decorator';
 import { RolesGuard } from './roles.guard';
+import { PermissionsGuard } from './guards/permissions.guard';
 import { Roles } from './decorators/roles.decorator';
+import { Permissions } from './decorators/permissions.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { User } from '../users/user.entity';
+import { CreateRoleDto } from './dto/create-role.dto';
+import { AssignRoleDto } from './dto/assign-role.dto';
 import {
   ApiBody,
   ApiAcceptedResponse,
@@ -503,5 +507,44 @@ export class AuthController {
   })
   async unlockAccount(@Param('userId') userId: string) {
     return this.usersService.unlockAccount(userId);
+  }
+
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('manage_roles')
+  @Post('admin/roles')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Create a role (Admin only)',
+    description: 'Creates a new role with specified permissions. Requires manage_roles permission.',
+  })
+  @ApiBody({ type: CreateRoleDto })
+  @ApiOkResponse({
+    description: 'Role created successfully.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions.',
+  })
+  async createRole(@Body() dto: CreateRoleDto) {
+    return this.authService.createRole(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('assign_roles')
+  @Patch('admin/users/:id/role')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Assign role to user (Admin only)',
+    description: 'Assigns a role to a user. Requires assign_roles permission.',
+  })
+  @ApiParam({ name: 'id', description: 'User ID' })
+  @ApiBody({ type: AssignRoleDto })
+  @ApiOkResponse({
+    description: 'Role assigned successfully.',
+  })
+  @ApiForbiddenResponse({
+    description: 'Insufficient permissions.',
+  })
+  async assignRole(@Param('id') userId: string, @Body() dto: AssignRoleDto) {
+    return this.authService.assignRole(userId, dto.roleId);
   }
 }

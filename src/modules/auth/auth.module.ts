@@ -8,10 +8,12 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './roles.guard';
+import { PermissionsGuard } from './guards/permissions.guard';
 import { UsersModule } from '../users/users.module';
 import { JwtStrategy } from './jwt.strategy';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
+import { Role } from './entities/role.entity';
 import { MailService } from './mail/mail.service';
 import { PasswordStrengthService } from './password-strength.service';
 
@@ -20,7 +22,7 @@ import { PasswordStrengthService } from './password-strength.service';
     UsersModule,
     PassportModule,
     HttpModule,
-    TypeOrmModule.forFeature([RefreshToken, PasswordResetToken]),
+    TypeOrmModule.forFeature([RefreshToken, PasswordResetToken, Role]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -31,7 +33,7 @@ import { PasswordStrengthService } from './password-strength.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, MailService, PasswordStrengthService],
-  exports: [AuthService, JwtAuthGuard, RolesGuard, PasswordStrengthService],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard, PermissionsGuard, MailService, PasswordStrengthService],
+  exports: [AuthService, JwtAuthGuard, RolesGuard, PermissionsGuard, PasswordStrengthService],
 })
 export class AuthModule {}

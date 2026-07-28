@@ -4,7 +4,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { MultiSigTransaction, MultiSigTransactionStatus } from './entities/multi-sig-transaction.entity';
+import { StellarAsset } from './entities/stellar-asset.entity';
 import { SignTransactionDto } from './dto/sign-transaction.dto';
+import { AddTrustlineDto } from './dto/add-trustline.dto';
+import { RemoveTrustlineDto } from './dto/remove-trustline.dto';
 import { WebhooksService } from '../webhooks/webhooks.service';
 
 @Injectable()
@@ -18,6 +21,8 @@ export class StellarService {
     private configService: ConfigService,
     @InjectRepository(MultiSigTransaction)
     private readonly multiSigRepo: Repository<MultiSigTransaction>,
+    @InjectRepository(StellarAsset)
+    private readonly assetRepo: Repository<StellarAsset>,
     @Inject(forwardRef(() => WebhooksService))
     private readonly webhooksService: WebhooksService,
   ) {
@@ -192,5 +197,99 @@ export class StellarService {
     throw new InternalServerErrorException(
       error.response?.data?.detail || 'Blockchain transaction failed',
     );
+  }
+
+  async listAssets(merchantId: string): Promise<StellarAsset[]> {
+    return this.assetRepo.find({
+      where: { merchantId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  getMode(): 'test' | 'live' {
+    return this.configService.get<string>('STELLAR_NETWORK') === 'PUBLIC' ? 'live' : 'test';
+  }
+
+  async fundTestnetAccount(address: string): Promise<any> {
+    if (this.getMode() !== 'test') {
+      throw new BadRequestException('Friendbot funding is only available in testnet mode');
+    }
+
+    try {
+      const response = await fetch(`https://friendbot.stellar.org?addr=${address}`);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      this.logger.error('Failed to fund testnet account', error);
+      throw new InternalServerErrorException('Failed to fund testnet account');
+    }
+  }
+
+  async addTrustline(dto: AddTrustlineDto, merchantId: string): Promise<StellarAsset> {
+    const existing = await this.assetRepo.findOne({
+      where: { merchantId, assetCode: dto.assetCode, assetIssuer: dto.assetIssuer },
+    });
+
+    if (existing) {
+      existing.isAccepted = true;
+      existing.trustlineAddedAt = new Date();
+      return this.assetRepo.save(existing);
+    }
+
+    const asset = this.assetRepo.create({
+      merchantId,
+      assetCode: dto.assetCode,
+      assetIssuer: dto.assetIssuer,
+      isAccepted: true,
+      trustlineAddedAt: new Date(),
+    });
+
+    return this.assetRepo.save(asset);
+  }
+
+  async removeTrustline(dto: RemoveTrustlineDto, merchantId: string): Promise<void> {
+    const asset = await this.assetRepo.findOne({
+      where: { merchantId, assetCode: dto.assetCode, assetIssuer: dto.assetIssuer },
+    });
+
+    if (!asset) {
+      throw new NotFoundException('Asset not found');
+    }
+
+    asset.isAccepted = false;
+    asset.trustlineAddedAt = null;
+    await this.assetRepo.save(asset);
+  }
+
+  async getBalances(merchantId: string): Promise<any> {
+    const assets = await this.assetRepo.find({
+      where: { merchantId, isAccepted: true },
+    });
+
+    const balances = [];
+    for (const asset of assets) {
+      try {
+        const account = await this.server.loadAccount(this.sourceKeypair.publicKey());
+        const balance = account.balances.find(
+          (b: any) => b.asset_code === asset.assetCode && b.asset_issuer === asset.assetIssuer,
+        );
+
+        balances.push({
+          assetCode: asset.assetCode,
+          assetIssuer: asset.assetIssuer,
+          balance: balance ? balance.balance : '0',
+        });
+      } catch (error) {
+        this.logger.error(`Failed to fetch balance for ${asset.assetCode}`, error);
+        balances.push({
+          assetCode: asset.assetCode,
+          assetIssuer: asset.assetIssuer,
+          balance: '0',
+          error: 'Failed to fetch balance',
+        });
+      }
+    }
+
+    return balances;
   }
 }
