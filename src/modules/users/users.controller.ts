@@ -171,6 +171,8 @@ export class UsersController {
   @Roles(UserRole.ADMIN)
   @Get()
   @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'List users with pagination and filtering',
     description:
       'Returns paginated users (passwords are never returned). Admin only.',
   })
@@ -211,7 +213,6 @@ export class UsersController {
       },
     },
   })
-  @ApiOperation({ summary: 'List users with pagination and filtering' })
   findAll(@Query() query: PaginationDto): Promise<PaginatedResult<any>> {
     return this.usersService.findAll(query);
   }

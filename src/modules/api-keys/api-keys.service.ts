@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { createHash, randomBytes } from 'crypto';
 import { ApiKey, ApiKeyEnvironment, ApiKeyScope } from './api-key.entity';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
+import { UpdateApiKeyDto } from './dto/update-api-key.dto';
 
 @Injectable()
 export class ApiKeysService {
@@ -48,6 +49,20 @@ export class ApiKeysService {
       where: { userId, isActive: true },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  async update(id: string, userId: string, dto: UpdateApiKeyDto): Promise<ApiKey> {
+    const key = await this.apiKeyRepository.findOne({ where: { id, userId } });
+    if (!key) {
+      throw new NotFoundException(`API key with ID ${id} not found`);
+    }
+    if (dto.name !== undefined) {
+      key.name = dto.name;
+    }
+    if (dto.scope !== undefined) {
+      key.scope = dto.scope;
+    }
+    return this.apiKeyRepository.save(key);
   }
 
   async revoke(id: string, userId: string): Promise<void> {
