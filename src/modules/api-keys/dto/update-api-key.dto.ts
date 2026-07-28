@@ -1,16 +1,15 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { ApiKeyScope } from '../api-key.entity';
 
 export class UpdateApiKeyDto {
-  @ApiPropertyOptional({ description: 'Human-readable name for this key', example: 'My integration' })
+  @ApiPropertyOptional({ description: 'New name for the API key', example: 'Renamed key' })
   @IsString()
-  @IsNotEmpty()
-  @MaxLength(255)
   @IsOptional()
+  @MaxLength(255)
   name?: string;
 
-  @ApiPropertyOptional({ enum: ApiKeyScope })
+  @ApiPropertyOptional({ enum: ApiKeyScope, description: 'New scope for the API key' })
   @IsEnum(ApiKeyScope)
   @IsOptional()
   scope?: ApiKeyScope;

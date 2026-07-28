@@ -20,6 +20,7 @@ import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { RatesModule } from './modules/rates/rates.module';
 import { MerchantsModule } from './modules/merchants/merchants.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 

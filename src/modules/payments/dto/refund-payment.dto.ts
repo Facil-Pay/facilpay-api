@@ -30,4 +30,12 @@ export class RefundPaymentDto {
     maxLength: 500,
   })
   reason?: string;
+
+  @IsString()
+  @IsOptional()
+  @ApiPropertyOptional({
+    description: 'User ID or system actor that initiated the refund',
+    example: 'admin-user-id',
+  })
+  initiatedBy?: string;
 }
