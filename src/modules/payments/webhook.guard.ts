@@ -46,6 +46,9 @@ export class WebhookGuard implements CanActivate {
    * For Express, we need to reconstruct from parsed body
    */
   private getRawBody(request: Request): string {
+    if ((request as any).rawBody) {
+      return (request as any).rawBody.toString('utf8');
+    }
     if (typeof request.body === 'string') {
       return request.body;
     }

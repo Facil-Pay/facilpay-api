@@ -19,7 +19,11 @@ export type PaymentsRow = Pick<
 
 export function csvEscape(value: unknown): string {
     if (value === null || value === undefined) return '';
-    const str = String(value);
+    let str = String(value);
+    // Neutralize formula injection characters: =, +, -, @
+    if (/^[=\+\-@]/.test(str)) {
+        str = "'" + str;
+    }
     // Quote if contains comma, quote, newline, or carriage return
     if (/[",\n\r]/.test(str)) {
         return '"' + str.replace(/"/g, '""') + '"';

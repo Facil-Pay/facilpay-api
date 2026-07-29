@@ -23,7 +23,7 @@ describe('PaymentsModule (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication();
+    app = moduleFixture.createNestApplication({ rawBody: true });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -222,6 +222,24 @@ describe('PaymentsModule (e2e)', () => {
         .set('X-Signature', signature)
         .send(body)
         .expect(404);
+    });
+
+    it('updates payment status with valid signature when body has non-standard formatting (raw body verification)', async () => {
+      const bodyStr = `{\n  "paymentId": "${paymentId}",\n  "status": "COMPLETED",\n  "externalReference": "EXT-E2E-RAW-123"\n}`;
+      const signature = crypto
+        .createHmac('sha256', WEBHOOK_SECRET)
+        .update(bodyStr)
+        .digest('hex');
+
+      const response = await request(app.getHttpServer())
+        .post('/v1/payments/webhook')
+        .set('X-Signature', signature)
+        .set('Content-Type', 'application/json')
+        .send(bodyStr)
+        .expect(200);
+
+      expect(response.body.status).toBe('COMPLETED');
+      expect(response.body.externalReference).toBe('EXT-E2E-RAW-123');
     });
   });
 

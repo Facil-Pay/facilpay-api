@@ -136,5 +136,30 @@ describe('WebhookGuard', () => {
         validSignature,
       );
     });
+
+    it('should verify signature against rawBody if present', () => {
+      const rawBodyString = '{\n  "paymentId": "123",\n  "status": "COMPLETED"\n}';
+      const mockRequest = {
+        headers: { 'x-signature': validSignature },
+        body: { paymentId: '123', status: 'COMPLETED' },
+        rawBody: Buffer.from(rawBodyString),
+      } as unknown as Request;
+
+      const mockContext = {
+        switchToHttp: () => ({
+          getRequest: () => mockRequest,
+        }),
+      } as unknown as ExecutionContext;
+
+      (signatureService.verifySignature as jest.Mock).mockReturnValue(true);
+
+      const result = guard.canActivate(mockContext);
+
+      expect(result).toBe(true);
+      expect(signatureService.verifySignature).toHaveBeenCalledWith(
+        rawBodyString,
+        validSignature,
+      );
+    });
   });
 });

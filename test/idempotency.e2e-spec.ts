@@ -102,4 +102,30 @@ describe('Idempotency (e2e)', () => {
     const payments = await dataSource.query('SELECT * FROM payments');
     expect(payments).toHaveLength(2);
   });
+
+  it('should handle concurrent requests atomically', async () => {
+    const idempotencyKey = 'concurrent-key-789';
+    const payload = { amount: 150, currency: 'USD' };
+
+    // Send two requests in parallel
+    const [res1, res2] = await Promise.all([
+      request(app.getHttpServer())
+        .post('/payments')
+        .set('Idempotency-Key', idempotencyKey)
+        .send(payload),
+      request(app.getHttpServer())
+        .post('/payments')
+        .set('Idempotency-Key', idempotencyKey)
+        .send(payload),
+    ]);
+
+    // One of them should succeed with 201, the other should return 409
+    const statuses = [res1.status, res2.status];
+    expect(statuses).toContain(201);
+    expect(statuses).toContain(409);
+
+    // Verify only one payment was created in DB
+    const payments = await dataSource.query('SELECT * FROM payments');
+    expect(payments).toHaveLength(1);
+  });
 });
