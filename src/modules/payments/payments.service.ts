@@ -16,6 +16,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Payment, PaymentStatus } from './payment.entity';
 import { Refund } from './refund.entity';
+import { Dispute, DisputeStatus } from './dispute.entity';
 import { PaymentSplit, PaymentSplitStatus } from './payment-split.entity';
 import { MerchantFeeConfig } from './merchant-fee-config.entity';
 import { UpsertMerchantFeeConfigDto } from './dto/upsert-merchant-fee-config.dto';
@@ -24,6 +25,7 @@ import { CreatePaymentDto } from './dto/create-payment.dto';
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
+import { PaymentTimelineEvent } from './dto/payment-timeline.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import {
   CursorPaginatedResult,
@@ -52,6 +54,8 @@ export class PaymentsService {
     private readonly merchantFeeConfigRepository: Repository<MerchantFeeConfig>,
     @InjectRepository(PaymentSplit)
     private readonly paymentSplitRepository: Repository<PaymentSplit>,
+    @InjectRepository(Dispute)
+    private readonly disputeRepository: Repository<Dispute>,
     private readonly dataSource: DataSource,
     appLogger: AppLogger,
     private readonly paymentSseService: PaymentSseService,
@@ -635,6 +639,119 @@ export class PaymentsService {
       where: { paymentId },
       order: { createdAt: 'DESC' },
     });
+  }
+
+  /**
+   * Returns a chronological timeline of events for a given payment.
+   * Aggregates data from the payment itself, its refunds, and disputes,
+   * sorted by timestamp ascending.
+   */
+  async getTimeline(paymentId: string): Promise<PaymentTimelineEvent[]> {
+    const payment = await this.findOne(paymentId);
+    const events: PaymentTimelineEvent[] = [];
+
+    // Payment creation event
+    events.push({
+      type: 'payment.created',
+      timestamp: payment.createdAt,
+      data: {
+        amount: payment.amount,
+        currency: payment.currency,
+        status: PaymentStatus.PENDING,
+        description: payment.description,
+      },
+    });
+
+    // Status changes reflect via updatedAt
+    if (payment.updatedAt && payment.updatedAt > payment.createdAt) {
+      events.push({
+        type: 'payment.status_updated',
+        timestamp: payment.updatedAt,
+        data: { status: payment.status },
+      });
+    }
+
+    // Cancellation event
+    if (payment.cancelledAt) {
+      events.push({
+        type: 'payment.cancelled',
+        timestamp: payment.cancelledAt,
+        data: { cancelledAt: payment.cancelledAt },
+      });
+    }
+
+    // Expiry event
+    if (payment.expiredAt) {
+      events.push({
+        type: 'payment.expired',
+        timestamp: payment.expiredAt,
+        data: { expiredAt: payment.expiredAt },
+      });
+    }
+
+    // Refund events
+    const refunds = await this.refundRepository.find({
+      where: { paymentId },
+      order: { createdAt: 'ASC' },
+    });
+    for (const refund of refunds) {
+      events.push({
+        type: 'refund.created',
+        timestamp: refund.createdAt,
+        data: {
+          refundId: refund.id,
+          amount: refund.amount,
+          reason: refund.reason,
+          initiatedBy: refund.initiatedBy,
+        },
+      });
+    }
+
+    // Dispute events
+    const disputes = await this.disputeRepository.find({
+      where: { paymentId },
+      order: { createdAt: 'ASC' },
+    });
+    for (const dispute of disputes) {
+      events.push({
+        type: 'dispute.opened',
+        timestamp: dispute.createdAt,
+        data: {
+          disputeId: dispute.id,
+          reason: dispute.reason,
+          description: dispute.description,
+          disputedAmount: dispute.disputedAmount,
+          status: dispute.status,
+        },
+      });
+
+      if (dispute.resolvedAt) {
+        events.push({
+          type: 'dispute.resolved',
+          timestamp: dispute.resolvedAt,
+          data: {
+            disputeId: dispute.id,
+            resolutionNotes: dispute.resolutionNotes,
+            resolvedBy: dispute.resolvedBy,
+          },
+        });
+      }
+
+      if (dispute.closedAt) {
+        events.push({
+          type: 'dispute.closed',
+          timestamp: dispute.closedAt,
+          data: {
+            disputeId: dispute.id,
+          },
+        });
+      }
+    }
+
+    // Sort all events chronologically
+    events.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+    return events;
   }
 
   async refund(
