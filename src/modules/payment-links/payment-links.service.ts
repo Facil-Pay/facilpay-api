@@ -9,6 +9,9 @@ import { Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { PaymentLink } from './payment-link.entity';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
+import { UpdatePaymentLinkDto } from './dto/update-payment-link.dto';
+import { PaginationDto } from '../../common/dto/pagination.dto';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class PaymentLinksService {
@@ -46,5 +49,43 @@ export class PaymentLinksService {
     if (link.merchantId !== merchantId) throw new ForbiddenException();
     link.isActive = false;
     await this.repo.save(link);
+  }
+
+  async findAllByMerchant(
+    merchantId: string,
+    pagination: PaginationDto,
+  ): Promise<PaginatedResult<PaymentLink>> {
+    const { page, limit, sortBy, order } = pagination;
+
+    const allowedSortFields = ['createdAt', 'amount', 'views', 'completions', 'updatedAt'];
+    const sortField = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
+
+    const [data, total] = await this.repo.findAndCount({
+      where: { merchantId },
+      order: { [sortField]: order || 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return { data, total, page, limit };
+  }
+
+  async update(
+    id: string,
+    merchantId: string,
+    dto: UpdatePaymentLinkDto,
+  ): Promise<PaymentLink> {
+    const link = await this.repo.findOneBy({ id });
+    if (!link) throw new NotFoundException('Payment link not found');
+    if (link.merchantId !== merchantId) throw new ForbiddenException();
+
+    if (dto.amount !== undefined) link.amount = dto.amount;
+    if (dto.currency !== undefined) link.currency = dto.currency;
+    if (dto.description !== undefined) link.description = dto.description;
+    if (dto.expiresAt !== undefined) {
+      link.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
+    }
+
+    return this.repo.save(link);
   }
 }
