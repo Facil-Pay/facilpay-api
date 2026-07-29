@@ -164,6 +164,33 @@ export class PaymentsService {
     return this.merchantFeeConfigRepository.save(config);
   }
 
+  async getMerchantFeeConfig(merchantId: string): Promise<{
+    merchantId: string;
+    flatFee: number;
+    percentageFee: number;
+    minFee: number;
+  }> {
+    const config = await this.merchantFeeConfigRepository.findOneBy({
+      merchantId,
+    });
+
+    if (config) {
+      return {
+        merchantId: config.merchantId,
+        flatFee: Number(config.flatFee ?? 0),
+        percentageFee: Number(config.percentageFee ?? 0),
+        minFee: Number(config.minFee ?? 0),
+      };
+    }
+
+    return {
+      merchantId,
+      flatFee: 0,
+      percentageFee: 0,
+      minFee: 0,
+    };
+  }
+
   async getFeeReport(merchantId: string): Promise<PaymentFeeReportDto> {
     const payments = await this.paymentRepository.find({
       where: { merchantId },

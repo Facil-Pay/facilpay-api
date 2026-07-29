@@ -28,6 +28,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { RecurringPayment } from './recurring-payment.entity';
 import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
+import { MerchantFeesController } from './merchant-fees.controller';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { RecurringPaymentsController } from './recurring-payments.controller';
     PaymentQrController,
     DisputesController,
     RecurringPaymentsController,
+    MerchantFeesController,
   ],
   providers: [
     PaymentsService,

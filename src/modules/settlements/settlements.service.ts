@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { Settlement } from './entities/settlement.entity';
 import {
   MerchantSettlementConfig,
@@ -14,6 +15,8 @@ import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class SettlementsService {
+  private readonly settleOnGross: boolean;
+
   constructor(
     @InjectRepository(Settlement)
     private readonly settlementRepo: Repository<Settlement>,
@@ -23,7 +26,16 @@ export class SettlementsService {
     private readonly paymentRepo: Repository<Payment>,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    this.settleOnGross =
+      String(
+        this.configService.get<string | boolean>(
+          'SETTLEMENT_USE_GROSS_AMOUNT',
+          'false',
+        ),
+      ).toLowerCase() === 'true';
+  }
 
   async upsertConfig(userId: string, dto: UpsertSettlementConfigDto): Promise<MerchantSettlementConfig> {
     let config = await this.configRepo.findOneBy({ userId });
@@ -103,6 +115,7 @@ export class SettlementsService {
     const completedPayments = await this.paymentRepo
       .createQueryBuilder('p')
       .where('p.status = :status', { status: PaymentStatus.COMPLETED })
+      .andWhere('p.merchantId = :merchantId', { merchantId: config.userId })
       .andWhere('p.currency = :currency', { currency: config.currency })
       .andWhere('p.updatedAt > :since', { since })
       .getMany();
@@ -110,7 +123,15 @@ export class SettlementsService {
     if (completedPayments.length === 0) return null;
 
     const totalAmount = completedPayments.reduce(
-      (sum, p) => sum + Number(p.amount),
+      (sum, p) =>
+        sum +
+        Number(
+          this.settleOnGross
+            ? p.amount
+            : p.netAmount !== undefined && p.netAmount !== null
+              ? p.netAmount
+              : p.amount,
+        ),
       0,
     );
 
