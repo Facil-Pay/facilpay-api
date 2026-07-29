@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ConfigModule } from '@nestjs/config';
 import { Settlement } from './entities/settlement.entity';
 import { MerchantSettlementConfig } from './entities/merchant-settlement-config.entity';
 import { SettlementsService } from './settlements.service';
@@ -12,6 +13,7 @@ import { MailService } from '../auth/mail/mail.service';
 
 @Module({
   imports: [
+    ConfigModule,
     ScheduleModule.forRoot(),
     TypeOrmModule.forFeature([Settlement, MerchantSettlementConfig, Payment]),
     UsersModule,

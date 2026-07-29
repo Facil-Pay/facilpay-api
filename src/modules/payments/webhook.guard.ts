@@ -22,17 +22,31 @@ export class WebhookGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<Request>();
     const signature = request.headers['x-signature'] as string;
+    const timestamp = request.headers['x-signature-timestamp'] as string;
+    const nonce = request.headers['x-signature-nonce'] as string | undefined;
 
     if (!signature) {
       throw new BadRequestException(
         'Missing X-Signature header. Please verify the webhook is correctly configured.',
       );
     }
+    if (!timestamp) {
+      throw new BadRequestException(
+        'Missing X-Signature-Timestamp header. Please verify the webhook is correctly configured.',
+      );
+    }
 
     // Get raw body for signature verification
     const rawBody = this.getRawBody(request);
 
-    if (!this.webhookSignatureService.verifySignature(rawBody, signature)) {
+    if (
+      !this.webhookSignatureService.verifySignature(
+        rawBody,
+        signature,
+        timestamp,
+        nonce,
+      )
+    ) {
       throw new BadRequestException(
         'Invalid webhook signature. Unauthorised webhook source.',
       );

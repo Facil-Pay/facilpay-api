@@ -20,6 +20,7 @@ import { SortOrder } from '../../common/dto/pagination.dto';
 describe('PaymentsService', () => {
   let service: PaymentsService;
   let repository: Repository<Payment>;
+  let merchantFeeConfigRepository: Repository<MerchantFeeConfig>;
   let dataSource: DataSource;
 
   const baseDate = new Date('2026-01-26T10:00:00.000Z');
@@ -183,6 +184,9 @@ describe('PaymentsService', () => {
 
     service = module.get<PaymentsService>(PaymentsService);
     repository = module.get<Repository<Payment>>(getRepositoryToken(Payment));
+    merchantFeeConfigRepository = module.get<Repository<MerchantFeeConfig>>(
+      getRepositoryToken(MerchantFeeConfig),
+    );
     dataSource = module.get<DataSource>(DataSource);
   });
 
@@ -669,6 +673,44 @@ describe('PaymentsService', () => {
       expect(mockQueryRunner.rollbackTransaction).toHaveBeenCalled();
       expect(mockQueryRunner.commitTransaction).not.toHaveBeenCalled();
       expect(mockQueryRunner.release).toHaveBeenCalled();
+    });
+  });
+
+  describe('getMerchantFeeConfig', () => {
+    it('returns existing fee configuration for merchant', async () => {
+      const existingConfig = {
+        merchantId: 'merchant-1',
+        flatFee: 1.5,
+        percentageFee: 2.25,
+        minFee: 0.5,
+      };
+      jest
+        .spyOn(merchantFeeConfigRepository, 'findOneBy')
+        .mockResolvedValueOnce(existingConfig as MerchantFeeConfig);
+
+      await expect(service.getMerchantFeeConfig('merchant-1')).resolves.toEqual(
+        {
+          merchantId: 'merchant-1',
+          flatFee: 1.5,
+          percentageFee: 2.25,
+          minFee: 0.5,
+        },
+      );
+    });
+
+    it('returns zeroed defaults when no fee config exists', async () => {
+      jest
+        .spyOn(merchantFeeConfigRepository, 'findOneBy')
+        .mockResolvedValueOnce(null);
+
+      await expect(service.getMerchantFeeConfig('merchant-2')).resolves.toEqual(
+        {
+          merchantId: 'merchant-2',
+          flatFee: 0,
+          percentageFee: 0,
+          minFee: 0,
+        },
+      );
     });
   });
 });

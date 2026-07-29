@@ -7,10 +7,10 @@ import { AppModule } from './../src/app.module';
 
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
-function generateSignature(body: object): string {
+function generateSignature(body: object, timestamp: string): string {
   return crypto
     .createHmac('sha256', WEBHOOK_SECRET)
-    .update(JSON.stringify(body))
+    .update(`${timestamp}.${JSON.stringify(body)}`)
     .digest('hex');
 }
 
@@ -164,7 +164,20 @@ describe('PaymentsModule (e2e)', () => {
     it('returns 400 when X-Signature header is missing', async () => {
       await request(app.getHttpServer())
         .post('/v1/payments/webhook')
+        .set('X-Signature-Timestamp', String(Math.floor(Date.now() / 1000)))
         .send({ paymentId, status: 'COMPLETED' })
+        .expect(400);
+    });
+
+    it('returns 400 when X-Signature-Timestamp header is missing', async () => {
+      const body = { paymentId, status: 'COMPLETED' };
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signature = generateSignature(body, timestamp);
+
+      await request(app.getHttpServer())
+        .post('/v1/payments/webhook')
+        .set('X-Signature', signature)
+        .send(body)
         .expect(400);
     });
 
@@ -172,6 +185,7 @@ describe('PaymentsModule (e2e)', () => {
       await request(app.getHttpServer())
         .post('/v1/payments/webhook')
         .set('X-Signature', 'invalid-signature')
+        .set('X-Signature-Timestamp', String(Math.floor(Date.now() / 1000)))
         .send({ paymentId, status: 'COMPLETED' })
         .expect(400);
     });
@@ -182,11 +196,13 @@ describe('PaymentsModule (e2e)', () => {
         status: 'COMPLETED',
         externalReference: 'EXT-E2E-123',
       };
-      const signature = generateSignature(body);
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signature = generateSignature(body, timestamp);
 
       const response = await request(app.getHttpServer())
         .post('/v1/payments/webhook')
         .set('X-Signature', signature)
+        .set('X-Signature-Timestamp', timestamp)
         .send(body)
         .expect(200);
 
@@ -201,11 +217,13 @@ describe('PaymentsModule (e2e)', () => {
         .expect(201);
 
       const body = { paymentId: newPayment.body.id, status: 'FAILED' };
-      const signature = generateSignature(body);
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signature = generateSignature(body, timestamp);
 
       const response = await request(app.getHttpServer())
         .post('/v1/payments/webhook')
         .set('X-Signature', signature)
+        .set('X-Signature-Timestamp', timestamp)
         .send(body)
         .expect(200);
 
@@ -215,13 +233,28 @@ describe('PaymentsModule (e2e)', () => {
     it('returns 404 via webhook for a non-existent payment ID', async () => {
       const nonExistentId = '00000000-0000-4000-a000-000000000000';
       const body = { paymentId: nonExistentId, status: 'COMPLETED' };
-      const signature = generateSignature(body);
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const signature = generateSignature(body, timestamp);
 
       await request(app.getHttpServer())
         .post('/v1/payments/webhook')
         .set('X-Signature', signature)
+        .set('X-Signature-Timestamp', timestamp)
         .send(body)
         .expect(404);
+    });
+
+    it('returns 400 when timestamp is outside tolerance window', async () => {
+      const body = { paymentId, status: 'COMPLETED' };
+      const staleTimestamp = String(Math.floor(Date.now() / 1000) - 10 * 60);
+      const signature = generateSignature(body, staleTimestamp);
+
+      await request(app.getHttpServer())
+        .post('/v1/payments/webhook')
+        .set('X-Signature', signature)
+        .set('X-Signature-Timestamp', staleTimestamp)
+        .send(body)
+        .expect(400);
     });
   });
 
