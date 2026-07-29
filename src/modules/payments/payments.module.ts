@@ -18,6 +18,7 @@ import { PaymentSseService } from './payment-sse.service';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { MerchantsModule } from '../merchants/merchants.module';
+import { UsersModule } from '../users/users.module';
 import { PaymentQrController } from './payment-qr.controller';
 import { MerchantFeeConfig } from './merchant-fee-config.entity';
 import { PaymentLinksModule } from '../payment-links/payment-links.module';
@@ -28,6 +29,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { RecurringPayment } from './recurring-payment.entity';
 import { RecurringPaymentsService } from './recurring-payments.service';
 import { RecurringPaymentsController } from './recurring-payments.controller';
+import { MerchantFeesController } from './merchant-fees.controller';
 
 @Module({
   imports: [
@@ -45,6 +47,7 @@ import { RecurringPaymentsController } from './recurring-payments.controller';
     WebhooksModule,
     StellarModule,
     MerchantsModule,
+    UsersModule,
     PaymentLinksModule,
     NotificationsModule,
   ],
@@ -54,6 +57,7 @@ import { RecurringPaymentsController } from './recurring-payments.controller';
     PaymentQrController,
     DisputesController,
     RecurringPaymentsController,
+    MerchantFeesController,
   ],
   providers: [
     PaymentsService,

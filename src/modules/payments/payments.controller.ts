@@ -460,14 +460,28 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Handle payment webhook',
     description:
-      'Updates payment status from an external provider. Requires a valid HMAC-SHA256 signature in the X-Signature header computed over the raw JSON body using the configured WEBHOOK_SECRET.',
+      'Updates payment status from an external provider. Requires X-Signature-Timestamp and a valid HMAC-SHA256 signature in X-Signature, computed over "<timestamp>.<raw_json_body>" using WEBHOOK_SECRET.',
   })
   @ApiHeader({
     name: 'X-Signature',
     description:
-      'HMAC-SHA256 hex digest of the raw request body, keyed with WEBHOOK_SECRET',
+      'HMAC-SHA256 hex digest of "<X-Signature-Timestamp>.<raw request body>", keyed with WEBHOOK_SECRET',
     required: true,
     example: 'a1b2c3d4e5f6...',
+  })
+  @ApiHeader({
+    name: 'X-Signature-Timestamp',
+    description:
+      'Unix timestamp (seconds). Requests older than configured tolerance are rejected.',
+    required: true,
+    example: '1753794900',
+  })
+  @ApiHeader({
+    name: 'X-Signature-Nonce',
+    description:
+      'Optional unique nonce for replay protection when nonce cache is enabled.',
+    required: false,
+    example: '0f14f837-5d15-4333-a283-6fccc5e29f28',
   })
   @ApiBody({ type: PaymentWebhookDto })
   @ApiOkResponse({

@@ -456,7 +456,7 @@ export class AuthController {
     return this.authService.resetPassword(dto);
   }
 
-  @UseGuards(RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Post('unlock/:userId')
   @HttpCode(HttpStatus.OK)

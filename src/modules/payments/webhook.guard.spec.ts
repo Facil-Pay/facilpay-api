@@ -9,6 +9,7 @@ describe('WebhookGuard', () => {
   let signatureService: WebhookSignatureService;
 
   const mockPayload = JSON.stringify({ paymentId: '123', status: 'COMPLETED' });
+  const timestamp = String(Math.floor(Date.now() / 1000));
   let validSignature: string;
 
   beforeEach(async () => {
@@ -54,7 +55,10 @@ describe('WebhookGuard', () => {
 
     it('should throw when signature is invalid', () => {
       const mockRequest = {
-        headers: { 'x-signature': 'invalid_signature' },
+        headers: {
+          'x-signature': 'invalid_signature',
+          'x-signature-timestamp': timestamp,
+        },
         body: mockPayload,
       } as unknown as Request;
 
@@ -74,7 +78,10 @@ describe('WebhookGuard', () => {
 
     it('should allow request with valid signature', () => {
       const mockRequest = {
-        headers: { 'x-signature': validSignature },
+        headers: {
+          'x-signature': validSignature,
+          'x-signature-timestamp': timestamp,
+        },
         body: mockPayload,
       } as unknown as Request;
 
@@ -94,7 +101,10 @@ describe('WebhookGuard', () => {
     it('should pass request body to signature verification', () => {
       const customPayload = JSON.stringify({ custom: 'data' });
       const mockRequest = {
-        headers: { 'x-signature': validSignature },
+        headers: {
+          'x-signature': validSignature,
+          'x-signature-timestamp': timestamp,
+        },
         body: customPayload,
       } as unknown as Request;
 
@@ -111,13 +121,18 @@ describe('WebhookGuard', () => {
       expect(signatureService.verifySignature).toHaveBeenCalledWith(
         customPayload,
         validSignature,
+        timestamp,
+        undefined,
       );
     });
 
     it('should handle string body', () => {
       const stringPayload = '{"test":"data"}';
       const mockRequest = {
-        headers: { 'x-signature': validSignature },
+        headers: {
+          'x-signature': validSignature,
+          'x-signature-timestamp': timestamp,
+        },
         body: stringPayload,
       } as unknown as Request;
 
@@ -134,6 +149,26 @@ describe('WebhookGuard', () => {
       expect(signatureService.verifySignature).toHaveBeenCalledWith(
         stringPayload,
         validSignature,
+        timestamp,
+        undefined,
+      );
+    });
+
+    it('should throw when X-Signature-Timestamp header is missing', () => {
+      const mockRequest = {
+        headers: { 'x-signature': validSignature },
+        body: mockPayload,
+      } as unknown as Request;
+
+      const mockContext = {
+        switchToHttp: () => ({
+          getRequest: () => mockRequest,
+        }),
+      } as unknown as ExecutionContext;
+
+      expect(() => guard.canActivate(mockContext)).toThrow(BadRequestException);
+      expect(() => guard.canActivate(mockContext)).toThrow(
+        'Missing X-Signature-Timestamp header',
       );
     });
 
