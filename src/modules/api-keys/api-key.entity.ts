@@ -60,6 +60,22 @@ export class ApiKey {
   @ApiProperty({ example: true })
   isActive: boolean;
 
+  @Column({ type: 'int', nullable: true })
+  @ApiPropertyOptional({
+    description:
+      'Custom requests-per-window limit for this key. When set, overrides the global default rate limit.',
+    example: 500,
+  })
+  rateLimitLimit: number | null;
+
+  @Column({ type: 'int', nullable: true })
+  @ApiPropertyOptional({
+    description:
+      'Window size in milliseconds for rateLimitLimit. Defaults to the global window when not set.',
+    example: 60000,
+  })
+  rateLimitTtl: number | null;
+
   @CreateDateColumn()
   @ApiProperty()
   createdAt: Date;

@@ -33,7 +33,7 @@ export class Refund {
 
   @Column({ nullable: true })
   @ApiPropertyOptional({ description: 'User ID or system actor that initiated the refund' })
-  initiatedBy: string;
+  initiatedBy: string | null;
 
   @CreateDateColumn()
   @ApiProperty()

@@ -22,6 +22,12 @@ import { PaymentQrController } from './payment-qr.controller';
 import { MerchantFeeConfig } from './merchant-fee-config.entity';
 import { PaymentLinksModule } from '../payment-links/payment-links.module';
 import { DisputesService } from './disputes.service';
+import { DisputesController } from './disputes.controller';
+import { Dispute } from './dispute.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { RecurringPayment } from './recurring-payment.entity';
+import { RecurringPaymentsService } from './recurring-payments.service';
+import { RecurringPaymentsController } from './recurring-payments.controller';
 
 @Module({
   imports: [
@@ -34,6 +40,7 @@ import { DisputesService } from './disputes.service';
       PaymentSplit,
       MerchantFeeConfig,
       Dispute,
+      RecurringPayment,
     ]),
     WebhooksModule,
     StellarModule,
@@ -46,7 +53,7 @@ import { DisputesService } from './disputes.service';
     CurrenciesController,
     PaymentQrController,
     DisputesController,
-    PaymentsAnalyticsController,
+    RecurringPaymentsController,
   ],
   providers: [
     PaymentsService,
@@ -57,7 +64,7 @@ import { DisputesService } from './disputes.service';
     IdempotencyInterceptor,
     CurrencyConfigService,
     PaymentSseService,
-    PaymentsAnalyticsService,
+    RecurringPaymentsService,
   ],
   exports: [
     PaymentsService,

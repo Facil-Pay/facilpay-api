@@ -42,7 +42,7 @@ export class Payment {
   @Column({ nullable: true })
   description: string;
 
-  @Column({ nullable: true, length: 2048 })
+  @Column({ type: 'varchar', nullable: true, length: 2048 })
   callbackUrl: string | null;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })

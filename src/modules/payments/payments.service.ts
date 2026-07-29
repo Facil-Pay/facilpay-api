@@ -574,6 +574,7 @@ export class PaymentsService {
   async refund(
     id: string,
     refundDto: RefundPaymentDto,
+    initiatedBy?: string,
   ): Promise<{ payment: Payment; refund: Refund }> {
     const queryRunner = this.dataSource.createQueryRunner();
 
@@ -617,7 +618,7 @@ export class PaymentsService {
         paymentId: id,
         amount: refundAmount,
         reason: refundDto.reason,
-        initiatedBy: refundDto.initiatedBy ?? null,
+        initiatedBy: initiatedBy ?? null,
       });
 
       const savedRefund = await queryRunner.manager.save(refund);

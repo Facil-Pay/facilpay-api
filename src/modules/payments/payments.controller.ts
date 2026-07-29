@@ -529,6 +529,7 @@ export class PaymentsController {
   }
 
   @Post(':id/refund')
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Refund a payment',
@@ -559,6 +560,7 @@ export class PaymentsController {
           paymentId: '123e4567-e89b-12d3-a456-426614174000',
           amount: '100.00',
           reason: 'Customer requested refund',
+          initiatedBy: '789e0123-e89b-12d3-a456-426614174000',
           createdAt: '2026-01-26T11:00:00.000Z',
         },
       },
@@ -603,8 +605,12 @@ export class PaymentsController {
       example: { statusCode: 500, message: 'Internal server error' },
     },
   })
-  refund(@Param('id') id: string, @Body() refundDto: RefundPaymentDto) {
-    return this.paymentsService.refund(id, refundDto);
+  refund(
+    @Param('id') id: string,
+    @Body() refundDto: RefundPaymentDto,
+    @Req() req: Request & { user?: { id: string } },
+  ) {
+    return this.paymentsService.refund(id, refundDto, req.user?.id);
   }
 
   @Post(':id/cancel')

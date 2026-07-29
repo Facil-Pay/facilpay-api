@@ -39,9 +39,7 @@ describe('MerchantThrottlerGuard', () => {
 
     // Create mock storage
     mockStorage = {
-      get: jest.fn(),
-      set: jest.fn(),
-      add: jest.fn(),
+      increment: jest.fn(),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({

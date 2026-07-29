@@ -2,8 +2,10 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsEnum,
   IsISO8601,
+  IsInt,
   IsNotEmpty,
   IsOptional,
+  IsPositive,
   IsString,
   MaxLength,
 } from 'class-validator';
@@ -33,4 +35,26 @@ export class CreateApiKeyDto {
   @IsISO8601()
   @IsOptional()
   expiresAt?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Custom requests-per-window limit for this key. Overrides the global default rate limit when set.',
+    example: 500,
+    minimum: 1,
+  })
+  @IsInt()
+  @IsPositive()
+  @IsOptional()
+  rateLimitLimit?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'Window size in milliseconds for rateLimitLimit. Defaults to the global window when not set.',
+    example: 60000,
+    minimum: 1,
+  })
+  @IsInt()
+  @IsPositive()
+  @IsOptional()
+  rateLimitTtl?: number;
 }

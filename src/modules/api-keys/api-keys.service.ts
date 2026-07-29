@@ -38,6 +38,8 @@ export class ApiKeysService {
       expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       lastUsedAt: null,
       isActive: true,
+      rateLimitLimit: dto.rateLimitLimit ?? null,
+      rateLimitTtl: dto.rateLimitTtl ?? null,
     });
 
     const saved = await this.apiKeyRepository.save(apiKey);
@@ -49,20 +51,6 @@ export class ApiKeysService {
       where: { userId, isActive: true },
       order: { createdAt: 'DESC' },
     });
-  }
-
-  async update(id: string, userId: string, dto: UpdateApiKeyDto): Promise<ApiKey> {
-    const key = await this.apiKeyRepository.findOne({ where: { id, userId } });
-    if (!key) {
-      throw new NotFoundException(`API key with ID ${id} not found`);
-    }
-    if (dto.name !== undefined) {
-      key.name = dto.name;
-    }
-    if (dto.scope !== undefined) {
-      key.scope = dto.scope;
-    }
-    return this.apiKeyRepository.save(key);
   }
 
   async revoke(id: string, userId: string): Promise<void> {
@@ -81,6 +69,8 @@ export class ApiKeysService {
     }
     if (dto.name !== undefined) key.name = dto.name;
     if (dto.scope !== undefined) key.scope = dto.scope;
+    if (dto.rateLimitLimit !== undefined) key.rateLimitLimit = dto.rateLimitLimit;
+    if (dto.rateLimitTtl !== undefined) key.rateLimitTtl = dto.rateLimitTtl;
     return this.apiKeyRepository.save(key);
   }
 

@@ -8,8 +8,10 @@ import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { PaymentSplit } from './payment-split.entity';
+import { MerchantFeeConfig } from './merchant-fee-config.entity';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { StellarService } from '../stellar/stellar.service';
+import { PaymentSseService } from './payment-sse.service';
 import { ConfigService } from '@nestjs/config';
 import {
   NotFoundException,
@@ -90,6 +92,14 @@ describe('PaymentsService - Refunds', () => {
           useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn(), findOneBy: jest.fn() },
         },
         {
+          provide: getRepositoryToken(MerchantFeeConfig),
+          useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn(), findOneBy: jest.fn() },
+        },
+        {
+          provide: PaymentSseService,
+          useValue: { emit: jest.fn() },
+        },
+        {
           provide: WebhooksService,
           useValue: { dispatchEventToMerchant: jest.fn().mockResolvedValue(undefined) },
         },
@@ -134,6 +144,66 @@ describe('PaymentsService - Refunds', () => {
       expect(result.payment.status).toBe(PaymentStatus.REFUNDED);
       expect(result.payment.refundedAmount).toBe(100);
       expect(result.refund.amount).toBe(100);
+    });
+
+    it('should record the authenticated actor as initiatedBy on the refund', async () => {
+      const payment = {
+        id: '123',
+        amount: 100,
+        refundedAmount: 0,
+        status: PaymentStatus.COMPLETED,
+      };
+
+      mockQueryRunner.manager.findOneBy.mockResolvedValue(payment);
+      mockQueryRunner.manager.create.mockReturnValue({
+        paymentId: '123',
+        amount: 100,
+        initiatedBy: 'admin-user-1',
+      });
+      mockQueryRunner.manager.save
+        .mockResolvedValueOnce({ id: 'refund-1', amount: 100, initiatedBy: 'admin-user-1' })
+        .mockResolvedValueOnce({
+          ...payment,
+          refundedAmount: 100,
+          status: PaymentStatus.REFUNDED,
+        });
+
+      const result = await service.refund('123', {}, 'admin-user-1');
+
+      expect(mockQueryRunner.manager.create).toHaveBeenCalledWith(
+        Refund,
+        expect.objectContaining({ initiatedBy: 'admin-user-1' }),
+      );
+      expect(result.refund.initiatedBy).toBe('admin-user-1');
+    });
+
+    it('should record initiatedBy as null when no actor is authenticated', async () => {
+      const payment = {
+        id: '123',
+        amount: 100,
+        refundedAmount: 0,
+        status: PaymentStatus.COMPLETED,
+      };
+
+      mockQueryRunner.manager.findOneBy.mockResolvedValue(payment);
+      mockQueryRunner.manager.create.mockReturnValue({
+        paymentId: '123',
+        amount: 100,
+      });
+      mockQueryRunner.manager.save
+        .mockResolvedValueOnce({ id: 'refund-1', amount: 100 })
+        .mockResolvedValueOnce({
+          ...payment,
+          refundedAmount: 100,
+          status: PaymentStatus.REFUNDED,
+        });
+
+      await service.refund('123', {});
+
+      expect(mockQueryRunner.manager.create).toHaveBeenCalledWith(
+        Refund,
+        expect.objectContaining({ initiatedBy: null }),
+      );
     });
 
     it('should process partial refund and set status to PARTIALLY_REFUNDED', async () => {

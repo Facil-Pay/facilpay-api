@@ -9,9 +9,13 @@ import { AppLogger } from '../logger/logger.service';
 import { IdempotencyService } from './idempotency.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { PaymentSplit } from './payment-split.entity';
+import { MerchantFeeConfig } from './merchant-fee-config.entity';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { StellarService } from '../stellar/stellar.service';
 import { ConfigService } from '@nestjs/config';
+import { PaymentSseService } from './payment-sse.service';
+import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
+import { SortOrder } from '../../common/dto/pagination.dto';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
@@ -153,6 +157,14 @@ describe('PaymentsService', () => {
         {
           provide: getRepositoryToken(PaymentSplit),
           useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn(), findOneBy: jest.fn() },
+        },
+        {
+          provide: getRepositoryToken(MerchantFeeConfig),
+          useValue: { create: jest.fn(), save: jest.fn(), find: jest.fn(), findOneBy: jest.fn() },
+        },
+        {
+          provide: PaymentSseService,
+          useValue: mockPaymentSseService,
         },
         {
           provide: WebhooksService,
@@ -480,7 +492,7 @@ describe('PaymentsService', () => {
       expect(queryBuilderMock.andWhere).toHaveBeenCalledWith(
         expect.stringContaining('payment.createdAt < :cursorValue'),
         expect.objectContaining({
-          cursorValue: mockPayment1.createdAt,
+          cursorValue: mockPayment1.createdAt.toISOString(),
           cursorId: mockPayment1.id,
         }),
       );
