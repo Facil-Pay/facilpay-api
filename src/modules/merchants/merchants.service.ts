@@ -2,15 +2,21 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
+import { MerchantIpAllowlist } from './entities/merchant-ip-allowlist.entity';
 import { UpdateGeoRestrictionsDto } from './dto/update-geo-restrictions.dto';
+import { UpdateIpAllowlistDto } from './dto/update-ip-allowlist.dto';
 import { GeoLookupService } from './geo-lookup.service';
 import { GeoRestrictedException } from './geo-restricted.exception';
+import { IpAllowlistBlockedException } from './ip-allowlist-blocked.exception';
+import { isIpAllowed } from './ip-utils';
 
 @Injectable()
 export class MerchantsService {
   constructor(
     @InjectRepository(MerchantGeoRestriction)
     private readonly geoRestrictionRepo: Repository<MerchantGeoRestriction>,
+    @InjectRepository(MerchantIpAllowlist)
+    private readonly ipAllowlistRepo: Repository<MerchantIpAllowlist>,
     private readonly geoLookupService: GeoLookupService,
   ) {}
 
@@ -67,6 +73,48 @@ export class MerchantsService {
       throw new GeoRestrictedException(
         `Payments from ${country} are not permitted by this merchant`,
       );
+    }
+  }
+
+  /**
+   * Upserts the IP allowlist for a merchant.
+   * An empty allowedIps array clears all restrictions.
+   */
+  async upsertIpAllowlist(
+    merchantId: string,
+    dto: UpdateIpAllowlistDto,
+  ): Promise<MerchantIpAllowlist> {
+    let record = await this.ipAllowlistRepo.findOneBy({ merchantId });
+    if (!record) {
+      record = this.ipAllowlistRepo.create({ merchantId, allowedIps: [] });
+    }
+    record.allowedIps = dto.allowedIps;
+    return this.ipAllowlistRepo.save(record);
+  }
+
+  /**
+   * Returns the current IP allowlist for a merchant.
+   */
+  async getIpAllowlist(merchantId: string): Promise<MerchantIpAllowlist | null> {
+    return this.ipAllowlistRepo.findOneBy({ merchantId });
+  }
+
+  /**
+   * Enforces the IP allowlist for a merchant API request.
+   * No-ops when the merchant has no allowlist config or the list is empty.
+   * Throws IpAllowlistBlockedException (403) when the IP is not allowed.
+   */
+  async enforceIpAllowlist(
+    merchantId: string,
+    ip: string | undefined,
+  ): Promise<void> {
+    if (!ip) return;
+
+    const record = await this.ipAllowlistRepo.findOneBy({ merchantId });
+    if (!record || !record.allowedIps?.length) return;
+
+    if (!isIpAllowed(ip, record.allowedIps)) {
+      throw new IpAllowlistBlockedException(ip);
     }
   }
 }
