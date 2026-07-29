@@ -301,27 +301,30 @@ export class DisputesService {
   }
 
   private async dispatchDisputeWebhook(dispute: Dispute, event: string): Promise<void> {
-    if (dispute.merchantEmail) {
-      // Find merchant ID from user service or payment
-      // For now, we'll dispatch to the merchant's webhook endpoints
-      // This would need to be integrated with the user/merchant service
-      await this.webhooksService.dispatchEventToMerchant(
-        dispute.merchantEmail, // This should be merchantId
-        event,
-        {
-          disputeId: dispute.id,
-          paymentId: dispute.paymentId,
-          status: dispute.status,
-          reason: dispute.reason,
-          disputedAmount: dispute.disputedAmount,
-          timestamp: new Date().toISOString(),
-        },
-      ).catch((error) => {
-        this.logger.error(
-          { error: error.message, disputeId: dispute.id, event },
-          'Failed to dispatch dispute webhook',
-        );
-      });
+    const payment = await this.paymentRepository.findOneBy({ id: dispute.paymentId });
+    if (!payment || !payment.merchantId) {
+      this.logger.error(
+        `Failed to dispatch dispute webhook: payment or merchantId not found for dispute ${dispute.id}`,
+      );
+      return;
     }
+
+    await this.webhooksService.dispatchEventToMerchant(
+      payment.merchantId,
+      event,
+      {
+        disputeId: dispute.id,
+        paymentId: dispute.paymentId,
+        status: dispute.status,
+        reason: dispute.reason,
+        disputedAmount: dispute.disputedAmount,
+        timestamp: new Date().toISOString(),
+      },
+    ).catch((error) => {
+      this.logger.error(
+        { error: error.message, disputeId: dispute.id, event },
+        'Failed to dispatch dispute webhook',
+      );
+    });
   }
 }

@@ -23,22 +23,26 @@ export class IdempotencyInterceptor implements NestInterceptor {
       return next.handle();
     }
 
-    const cachedResponse = await this.idempotencyService.checkKey(
+    const cachedResponse = await this.idempotencyService.checkOrClaimKey(
       idempotencyKey,
       request.body,
     );
 
-    if (cachedResponse) {
+    if (cachedResponse !== null) {
       return of(cachedResponse);
     }
 
     return next.handle().pipe(
-      tap(async (response) => {
-        await this.idempotencyService.storeKey(
-          idempotencyKey,
-          request.body,
-          response,
-        );
+      tap({
+        next: async (response) => {
+          await this.idempotencyService.updateResponse(
+            idempotencyKey,
+            response,
+          );
+        },
+        error: async (err) => {
+          await this.idempotencyService.deleteKey(idempotencyKey);
+        },
       }),
     );
   }
