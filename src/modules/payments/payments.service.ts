@@ -35,6 +35,7 @@ import { PaymentSseService } from './payment-sse.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { StellarService } from '../stellar/stellar.service';
+import { UsersService } from '../users/users.service';
 
 const DEFAULT_PAYMENT_EXPIRY_SECONDS = 1800;
 
@@ -58,6 +59,7 @@ export class PaymentsService {
     private readonly webhooksService: WebhooksService,
     private readonly configService: ConfigService,
     private readonly stellarService: StellarService,
+    private readonly usersService: UsersService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
   }
@@ -109,6 +111,27 @@ export class PaymentsService {
       throw new UnprocessableEntityException(
         `Payment amount ${amount} would exceed the daily limit of ${dailyLimit} for ${userKey}`,
       );
+    }
+  }
+
+  /**
+   * Validate that merchantId corresponds to a real user/merchant.
+   * Throws BadRequestException if merchantId is provided but doesn't exist.
+   */
+  private async validateMerchantId(merchantId: string | undefined): Promise<void> {
+    if (!merchantId) {
+      return; // merchantId is optional
+    }
+
+    try {
+      await this.usersService.findOne(merchantId);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new BadRequestException(
+          `Invalid merchantId: merchant with ID '${merchantId}' does not exist`,
+        );
+      }
+      throw error;
     }
   }
 
@@ -229,6 +252,9 @@ export class PaymentsService {
         `Starting payment creation transaction for amount: ${createPaymentDto.amount}`,
       );
 
+      // Validate merchantId if provided
+      await this.validateMerchantId(createPaymentDto.merchantId);
+
       await this.ensurePaymentLimits(createPaymentDto);
       const fee = await this.calculateFee(
         createPaymentDto.merchantId,
@@ -298,6 +324,19 @@ export class PaymentsService {
           createPaymentDtos.length
         } items.`,
       );
+
+      // Validate all merchantIds upfront
+      const uniqueMerchantIds = [
+        ...new Set(
+          createPaymentDtos
+            .map((dto) => dto.merchantId)
+            .filter((id): id is string => id !== undefined),
+        ),
+      ];
+
+      for (const merchantId of uniqueMerchantIds) {
+        await this.validateMerchantId(merchantId);
+      }
 
       const paymentPayloads = await Promise.all(
         createPaymentDtos.map(async (createPaymentDto) => {
@@ -825,18 +864,55 @@ export class PaymentsService {
   /**
    * Sweeps for PENDING payments past their expiresAt and transitions them to EXPIRED.
    * Runs every minute per acceptance criteria for #176.
+   * Processes payments in bounded batches to prevent unbounded processing under high load.
    */
   @Cron(CronExpression.EVERY_MINUTE)
   async expirePendingPayments(): Promise<void> {
+    const batchSize = this.configService.get<number>(
+      'PAYMENT_EXPIRY_BATCH_SIZE',
+      100,
+    );
+
     const expiredPayments = await this.paymentRepository.find({
       where: {
         status: PaymentStatus.PENDING,
         expiresAt: LessThanOrEqual(new Date()),
       },
+      take: batchSize, // Limit batch size to prevent unbounded processing
+      order: {
+        expiresAt: 'ASC', // Process oldest first
+      },
     });
 
-    for (const payment of expiredPayments) {
-      await this.expirePayment(payment);
+    if (expiredPayments.length === 0) {
+      return;
+    }
+
+    this.logger.info(
+      `Processing ${expiredPayments.length} expired payments (batch limit: ${batchSize})`,
+    );
+
+    // Process payments in parallel for better performance
+    const results = await Promise.allSettled(
+      expiredPayments.map((payment) => this.expirePayment(payment)),
+    );
+
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+
+    if (failed > 0) {
+      this.logger.warn(
+        `Expired ${succeeded} payments successfully, ${failed} failed`,
+      );
+    } else {
+      this.logger.info(`Successfully expired ${succeeded} payments`);
+    }
+
+    // If we processed a full batch, there might be more - log a warning
+    if (expiredPayments.length === batchSize) {
+      this.logger.warn(
+        `Processed full batch of ${batchSize} payments. More expired payments may be pending.`,
+      );
     }
   }
 

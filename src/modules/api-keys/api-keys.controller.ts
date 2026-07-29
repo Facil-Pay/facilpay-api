@@ -8,6 +8,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -18,12 +19,14 @@ import {
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { ApiKeysService } from './api-keys.service';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { UpdateApiKeyDto } from './dto/update-api-key.dto';
+import { GetApiKeyUsageDto } from './dto/get-api-key-usage.dto';
 import { ApiKey } from './api-key.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -111,36 +114,46 @@ export class ApiKeysController {
     return this.apiKeysService.revoke(id, user.id);
   }
 
-  @Post(':id/rotate')
+  @Get(':id/usage')
   @ApiOperation({
-    summary: 'Rotate an API key\'s secret',
-    description: 'Deactivates the current key and generates a new one with the same name, scope, and environment. The new plaintext key is returned only once.',
+    summary: 'Get API key usage history',
+    description:
+      'Returns a paginated list of recent usage records for a specific API key, including endpoint, source IP, and timestamp for each authenticated request.',
   })
-  @ApiCreatedResponse({
-    description: 'New API key generated. Plaintext shown only once.',
+  @ApiParam({
+    name: 'id',
+    description: 'API key UUID',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  @ApiOkResponse({
+    description: 'List of usage records.',
     schema: {
       example: {
-        apiKey: {
-          id: 'new-uuid',
-          name: 'My integration',
-          keyPrefix: 'fp_live_xxxx',
-          scope: 'read',
-          environment: 'live',
-          expiresAt: null,
-          lastUsedAt: null,
-          isActive: true,
-          createdAt: '2026-07-28T10:00:00.000Z',
-        },
-        plaintext: 'fp_live_newtoken...',
+        data: [
+          {
+            id: 'usage-uuid-1',
+            apiKeyId: '550e8400-e29b-41d4-a716-446655440000',
+            endpoint: '/v1/payments',
+            method: 'POST',
+            sourceIp: '192.168.1.1',
+            userAgent: 'Mozilla/5.0...',
+            statusCode: 201,
+            createdAt: '2026-07-28T10:00:00.000Z',
+          },
+        ],
+        total: 150,
+        page: 1,
+        limit: 20,
       },
     },
   })
   @ApiNotFoundResponse({ description: 'API key not found.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
-  async rotate(
+  async getUsageHistory(
     @Param('id') id: string,
     @CurrentUser() user: User,
-  ): Promise<{ apiKey: ApiKey; plaintext: string }> {
-    return this.apiKeysService.rotate(id, user.id);
+    @Query() dto: GetApiKeyUsageDto,
+  ) {
+    return this.apiKeysService.getUsageHistory(id, user.id, dto);
   }
 }

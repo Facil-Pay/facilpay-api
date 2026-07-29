@@ -4,17 +4,25 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, LessThan, Between } from 'typeorm';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
 import { ApiKey, ApiKeyEnvironment, ApiKeyScope } from './api-key.entity';
+import { ApiKeyUsage } from './api-key-usage.entity';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
 import { UpdateApiKeyDto } from './dto/update-api-key.dto';
+import { GetApiKeyUsageDto } from './dto/get-api-key-usage.dto';
+import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class ApiKeysService {
   constructor(
     @InjectRepository(ApiKey)
     private readonly apiKeyRepository: Repository<ApiKey>,
+    @InjectRepository(ApiKeyUsage)
+    private readonly apiKeyUsageRepository: Repository<ApiKeyUsage>,
+    private readonly configService: ConfigService,
   ) {}
 
   async create(
@@ -118,5 +126,89 @@ export class ApiKeysService {
     await this.apiKeyRepository.save(key);
 
     return key;
+  }
+
+  async recordUsage(
+    apiKeyId: string,
+    endpoint: string,
+    method: string,
+    sourceIp: string | null,
+    userAgent: string | null,
+    statusCode?: number,
+  ): Promise<void> {
+    const usage = this.apiKeyUsageRepository.create({
+      apiKeyId,
+      endpoint,
+      method,
+      sourceIp,
+      userAgent,
+      statusCode: statusCode ?? null,
+    });
+
+    await this.apiKeyUsageRepository.save(usage);
+  }
+
+  async getUsageHistory(
+    apiKeyId: string,
+    userId: string,
+    dto: GetApiKeyUsageDto,
+  ): Promise<PaginatedResult<ApiKeyUsage>> {
+    // Verify the API key belongs to the user
+    const key = await this.apiKeyRepository.findOne({
+      where: { id: apiKeyId, userId },
+    });
+
+    if (!key) {
+      throw new NotFoundException(`API key with ID ${apiKeyId} not found`);
+    }
+
+    const query = this.apiKeyUsageRepository
+      .createQueryBuilder('usage')
+      .where('usage.apiKeyId = :apiKeyId', { apiKeyId });
+
+    if (dto.from && dto.to) {
+      query.andWhere('usage.createdAt BETWEEN :from AND :to', {
+        from: new Date(dto.from),
+        to: new Date(dto.to),
+      });
+    } else if (dto.from) {
+      query.andWhere('usage.createdAt >= :from', { from: new Date(dto.from) });
+    } else if (dto.to) {
+      query.andWhere('usage.createdAt <= :to', { to: new Date(dto.to) });
+    }
+
+    const page = dto.page || 1;
+    const limit = dto.limit || 20;
+    const skip = (page - 1) * limit;
+
+    query.orderBy('usage.createdAt', 'DESC').skip(skip).take(limit);
+
+    const [data, total] = await query.getManyAndCount();
+
+    return { data, total, page, limit };
+  }
+
+  /**
+   * Prune old usage records to prevent unbounded storage growth.
+   * Runs daily and removes records older than the configured retention period.
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_2AM)
+  async pruneOldUsageRecords(): Promise<void> {
+    const retentionDays = this.configService.get<number>(
+      'API_KEY_USAGE_RETENTION_DAYS',
+      90,
+    );
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+
+    const result = await this.apiKeyUsageRepository.delete({
+      createdAt: LessThan(cutoffDate),
+    });
+
+    if (result.affected && result.affected > 0) {
+      console.log(
+        `Pruned ${result.affected} API key usage records older than ${retentionDays} days`,
+      );
+    }
   }
 }
