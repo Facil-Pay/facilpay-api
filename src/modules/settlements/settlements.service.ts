@@ -9,9 +9,13 @@ import {
   SettlementSchedule,
 } from './entities/merchant-settlement-config.entity';
 import { UpsertSettlementConfigDto } from './dto/upsert-settlement-config.dto';
+import { GetSettlementsDto } from './dto/get-settlements.dto';
 import { Payment, PaymentStatus } from '../payments/payment.entity';
 import { MailService } from '../auth/mail/mail.service';
 import { UsersService } from '../users/users.service';
+import {
+  PaginatedResult,
+} from '../../common/interfaces/paginated-result.interface';
 
 @Injectable()
 export class SettlementsService {
@@ -48,15 +52,55 @@ export class SettlementsService {
     return this.configRepo.save(config);
   }
 
-  async findMerchantSettlements(merchantId: string): Promise<Settlement[]> {
-    return this.settlementRepo.find({
-      where: { merchantId },
-      order: { processedAt: 'DESC' },
-    });
+  async findMerchantSettlements(
+    merchantId: string,
+    dto?: GetSettlementsDto,
+  ): Promise<PaginatedResult<Settlement>> {
+    const query = this.settlementRepo.createQueryBuilder('settlement');
+
+    query.where('settlement.merchantId = :merchantId', { merchantId });
+
+    if (dto?.from) {
+      query.andWhere('settlement.processedAt >= :fromDate', { fromDate: dto.from });
+    }
+    if (dto?.to) {
+      query.andWhere('settlement.processedAt <= :toDate', { toDate: dto.to });
+    }
+
+    const page = dto?.page || 1;
+    const limit = dto?.limit || 20;
+    const skip = (page - 1) * limit;
+
+    query.orderBy('settlement.processedAt', 'DESC');
+    query.skip(skip).take(limit);
+
+    const [data, total] = await query.getManyAndCount();
+
+    return { data, total, page, limit };
   }
 
-  async findAllSettlements(): Promise<Settlement[]> {
-    return this.settlementRepo.find({ order: { processedAt: 'DESC' } });
+  async findAllSettlements(
+    dto?: GetSettlementsDto,
+  ): Promise<PaginatedResult<Settlement>> {
+    const query = this.settlementRepo.createQueryBuilder('settlement');
+
+    if (dto?.from) {
+      query.andWhere('settlement.processedAt >= :fromDate', { fromDate: dto.from });
+    }
+    if (dto?.to) {
+      query.andWhere('settlement.processedAt <= :toDate', { toDate: dto.to });
+    }
+
+    const page = dto?.page || 1;
+    const limit = dto?.limit || 20;
+    const skip = (page - 1) * limit;
+
+    query.orderBy('settlement.processedAt', 'DESC');
+    query.skip(skip).take(limit);
+
+    const [data, total] = await query.getManyAndCount();
+
+    return { data, total, page, limit };
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
