@@ -222,7 +222,7 @@ export class UsersController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Get a user by id',
-    description: 'Returns a single user by their id.',
+    description: 'Returns a single user by their id. Users can only view their own profile unless they are an admin.',
   })
   @ApiParam({
     name: 'id',
@@ -240,8 +240,17 @@ export class UsersController {
       },
     },
   })
-  findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+  @ApiForbiddenResponse({
+    description: 'Non-admin users can only view their own profile.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Forbidden',
+      },
+    },
+  })
+  findOne(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.usersService.findOneWithAuth(id, user);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -250,7 +259,7 @@ export class UsersController {
   @ApiOperation({
     summary: 'Update a user',
     description:
-      'Updates user fields by id. Only provided fields will be changed. Returns the updated user.',
+      'Updates user fields by id. Only provided fields will be changed. Returns the updated user. Users can only update their own profile unless they are an admin.',
   })
   @ApiParam({
     name: 'id',
@@ -281,8 +290,21 @@ export class UsersController {
       },
     },
   })
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(id, updateUserDto);
+  @ApiForbiddenResponse({
+    description: 'Non-admin users can only update their own profile.',
+    schema: {
+      example: {
+        statusCode: 403,
+        message: 'Forbidden',
+      },
+    },
+  })
+  update(
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.usersService.updateWithAuth(id, updateUserDto, user);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard)

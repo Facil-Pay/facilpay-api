@@ -39,7 +39,7 @@ import { User } from '../users/user.entity';
 @UseGuards(JwtAuthGuard)
 @Controller('v1/webhooks')
 export class WebhooksController {
-  constructor(private readonly webhooksService: WebhooksService) {}
+  constructor(private readonly webhooksService: WebhooksService) { }
 
   @Post()
   @ApiOperation({
@@ -303,12 +303,15 @@ export class WebhooksController {
     description: 'Webhook delivery scheduled for manual retry.',
   })
   @ApiForbiddenResponse({
-    description: 'Delivery is not failed or dead-lettered.',
+    description: 'Delivery is not failed or dead-lettered, or belongs to a different merchant.',
   })
   @ApiNotFoundResponse({
     description: 'Webhook delivery not found.',
   })
-  async retryFailedDelivery(@Param('deliveryId') deliveryId: string): Promise<void> {
-    return this.webhooksService.retryFailedDelivery(deliveryId);
+  async retryFailedDelivery(
+    @Param('deliveryId') deliveryId: string,
+    @CurrentUser() user: User,
+  ): Promise<void> {
+    return this.webhooksService.retryFailedDelivery(deliveryId, user.id);
   }
 }

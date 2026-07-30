@@ -110,7 +110,7 @@ export class WebhooksService {
       payload,
       status: WebhookDeliveryStatus.PENDING,
     });
-    
+
     const savedDelivery = await this.deliveryRepo.save(delivery);
 
     await this.webhooksQueue.add(
@@ -132,10 +132,18 @@ export class WebhooksService {
     );
   }
 
-  async retryFailedDelivery(deliveryId: string): Promise<void> {
-    const delivery = await this.deliveryRepo.findOne({ where: { id: deliveryId } });
+  async retryFailedDelivery(deliveryId: string, merchantId: string): Promise<void> {
+    const delivery = await this.deliveryRepo.findOne({
+      where: { id: deliveryId },
+      relations: ['endpoint'],
+    });
     if (!delivery) {
       throw new NotFoundException(`Webhook delivery ${deliveryId} not found`);
+    }
+
+    // Verify that the delivery's parent endpoint belongs to the authenticated merchant
+    if (delivery.endpoint.merchantId !== merchantId) {
+      throw new ForbiddenException();
     }
 
     if (delivery.status !== WebhookDeliveryStatus.FAILED && delivery.status !== WebhookDeliveryStatus.DEAD_LETTER) {
@@ -162,8 +170,8 @@ export class WebhooksService {
         removeOnFail: false,
       }
     );
-    
-    this.logger.info({ deliveryId }, 'Webhook delivery scheduled for manual retry');
+
+    this.logger.info({ deliveryId, merchantId }, 'Webhook delivery scheduled for manual retry');
   }
 
   private async findOwned(id: string, merchantId: string): Promise<WebhookEndpoint> {

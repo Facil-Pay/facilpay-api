@@ -91,6 +91,22 @@ export class UsersService {
     return result;
   }
 
+  /**
+   * Find a user by ID with authorization check.
+   * Users can only view their own profile unless they are an admin.
+   */
+  async findOneWithAuth(id: string, requestingUser: User): Promise<Omit<User, 'password'>> {
+    // Check if user is admin or viewing their own profile
+    const isAdmin = requestingUser.roles.includes(UserRole.ADMIN);
+    const isOwnProfile = requestingUser.id === id;
+
+    if (!isAdmin && !isOwnProfile) {
+      throw new ForbiddenException('You can only view your own profile');
+    }
+
+    return this.findOne(id);
+  }
+
   async findByEmail(email: string): Promise<User | undefined> {
     return await this.userRepository.findOne({
       where: { email, deletedAt: null },
@@ -144,6 +160,26 @@ export class UsersService {
       this.logger.info({ userId: result.id, updatedFields }, 'User updated');
     }
     return result;
+  }
+
+  /**
+   * Update a user with authorization check.
+   * Users can only update their own profile unless they are an admin.
+   */
+  async updateWithAuth(
+    id: string,
+    updateUserDto: UpdateUserDto,
+    requestingUser: User,
+  ): Promise<Omit<User, 'password'>> {
+    // Check if user is admin or updating their own profile
+    const isAdmin = requestingUser.roles.includes(UserRole.ADMIN);
+    const isOwnProfile = requestingUser.id === id;
+
+    if (!isAdmin && !isOwnProfile) {
+      throw new ForbiddenException('You can only update your own profile');
+    }
+
+    return this.update(id, updateUserDto);
   }
 
   async softDelete(id: string): Promise<void> {
@@ -365,7 +401,7 @@ export class UsersService {
   async consumeBackupCode(userId: string, code: string): Promise<boolean> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.backupCodes || user.backupCodes.length === 0) return false;
-    
+
     // Check if code matches any hashed backup code
     for (let i = 0; i < user.backupCodes.length; i++) {
       const isMatch = await bcrypt.compare(code, user.backupCodes[i]);
