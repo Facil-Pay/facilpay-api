@@ -27,6 +27,11 @@ import { UsersModule } from '../users/users.module';
         ttl: 60000, // 1 minute in milliseconds
         limit: 1000, // 1000 requests per minute for webhooks
       },
+      {
+        name: 'qr',
+        ttl: 60000, // 1 minute in milliseconds
+        limit: 20, // 20 requests per minute for public QR code generation
+      },
     ]),
     UsersModule,
   ],
