@@ -76,9 +76,10 @@ export class PaymentsController {
     private readonly paymentsService: PaymentsService,
     private readonly paymentSseService: PaymentSseService,
     private readonly merchantsService: MerchantsService,
-  ) {}
+  ) { }
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
@@ -127,6 +128,15 @@ export class PaymentsController {
       },
     },
   })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid bearer token.',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
+      },
+    },
+  })
   @ApiResponse({
     status: 409,
     description: 'Idempotency key reused with a different request body.',
@@ -171,6 +181,7 @@ export class PaymentsController {
 
   @BulkThrottle()
   @Post('bulk')
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Create multiple payments in a single transaction',
@@ -191,6 +202,15 @@ export class PaymentsController {
         message:
           'Payment batch must contain between 1 and 100 payment objects.',
         error: 'Bad Request',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid bearer token.',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
       },
     },
   })
@@ -310,6 +330,7 @@ export class PaymentsController {
   }
 
   @Get()
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'List all payments',
@@ -396,6 +417,15 @@ export class PaymentsController {
       ],
     },
   })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid bearer token.',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
+      },
+    },
+  })
   @ApiInternalServerErrorResponse({
     description: 'Internal server error.',
     schema: {
@@ -417,6 +447,7 @@ export class PaymentsController {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Get a payment by ID',
@@ -439,6 +470,15 @@ export class PaymentsController {
         message:
           'Payment with ID 123e4567-e89b-12d3-a456-426614174000 not found',
         error: 'Not Found',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid bearer token.',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
       },
     },
   })
@@ -629,6 +669,7 @@ export class PaymentsController {
   }
 
   @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -679,6 +720,15 @@ export class PaymentsController {
         message:
           'Cannot cancel payment with status COMPLETED. Only PENDING payments can be cancelled.',
         error: 'Conflict',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({
+    description: 'Missing or invalid bearer token.',
+    schema: {
+      example: {
+        statusCode: 401,
+        message: 'Unauthorized',
       },
     },
   })
