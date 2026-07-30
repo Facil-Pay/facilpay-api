@@ -4,6 +4,7 @@ import { Response } from 'express';
 import { PaymentLinksService } from '../payment-links/payment-links.service';
 import { PaymentsService } from './payments.service';
 import * as QRCode from 'qrcode';
+import { QrThrottle } from '../throttler/throttler.decorator';
 
 @ApiTags('payments')
 @Controller('v1')
@@ -14,6 +15,7 @@ export class PaymentQrController {
   ) {}
 
   @Get('payments/:id/qr')
+  @QrThrottle()
   @ApiOperation({ summary: 'Generate a QR code for a payment' })
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiQuery({ name: 'size', required: false, example: 300 })
@@ -43,6 +45,7 @@ export class PaymentQrController {
   }
 
   @Get('payment-links/:token/qr')
+  @QrThrottle()
   @ApiOperation({ summary: 'Generate a QR code for a payment link' })
   @ApiParam({ name: 'token', description: 'Payment link token' })
   @ApiQuery({ name: 'size', required: false, example: 300 })
