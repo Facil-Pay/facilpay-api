@@ -1,4 +1,4 @@
-import { Controller, Get, Post, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -6,8 +6,10 @@ import {
   ApiOkResponse,
   ApiUnauthorizedResponse,
   ApiForbiddenResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { SettlementsService } from './settlements.service';
+import { GetSettlementsDto } from './dto/get-settlements.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -24,13 +26,17 @@ export class AdminSettlementsController {
   @Get()
   @ApiOperation({
     summary: 'List all settlements (admin)',
-    description: 'Admin-only endpoint. Returns all settlements across all merchants.',
+    description: 'Admin-only endpoint. Returns paginated settlements across all merchants with optional date filtering.',
   })
-  @ApiOkResponse({ description: 'All settlements.' })
+  @ApiQuery({ name: 'from', required: false, description: 'Start date filter (ISO 8601)' })
+  @ApiQuery({ name: 'to', required: false, description: 'End date filter (ISO 8601)' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default: 20, max: 100)' })
+  @ApiOkResponse({ description: 'Paginated settlement list.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
   @ApiForbiddenResponse({ description: 'Admin role required.' })
-  findAll() {
-    return this.service.findAllSettlements();
+  findAll(@Query() dto?: GetSettlementsDto) {
+    return this.service.findAllSettlements(dto);
   }
 
   @Post('run')

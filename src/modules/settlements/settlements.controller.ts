@@ -5,6 +5,7 @@ import {
   Body,
   UseGuards,
   Request,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -13,11 +14,12 @@ import {
   ApiOperation,
   ApiBearerAuth,
   ApiOkResponse,
-  ApiCreatedResponse,
   ApiUnauthorizedResponse,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { SettlementsService } from './settlements.service';
 import { UpsertSettlementConfigDto } from './dto/upsert-settlement-config.dto';
+import { GetSettlementsDto } from './dto/get-settlements.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -46,11 +48,18 @@ export class SettlementsController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'List merchant settlement history',
-    description: 'Returns all settlements for the authenticated merchant, ordered by processedAt desc.',
+    description: 'Returns paginated settlements for the authenticated merchant with optional date filtering.',
   })
-  @ApiOkResponse({ description: 'Settlement list.' })
+  @ApiQuery({ name: 'from', required: false, description: 'Start date filter (ISO 8601)' })
+  @ApiQuery({ name: 'to', required: false, description: 'End date filter (ISO 8601)' })
+  @ApiQuery({ name: 'page', required: false, description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Items per page (default: 20, max: 100)' })
+  @ApiOkResponse({ description: 'Paginated settlement list.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
-  findMerchantSettlements(@Request() req: any) {
-    return this.service.findMerchantSettlements(req.user.id);
+  findMerchantSettlements(
+    @Request() req: any,
+    @Query() dto?: GetSettlementsDto,
+  ) {
+    return this.service.findMerchantSettlements(req.user.id, dto);
   }
 }
