@@ -1,20 +1,31 @@
-# TODO - Multi-currency support (ISO 4217 + supported allowlist)
+# Task: Add API Key Rotation & Payment Timeline Endpoints
 
-- [x] Step 1: Add currency config service reading `SUPPORTED_CURRENCIES` (comma-separated ISO codes)
+## Steps
 
-- [x] Step 2: Add `IsISO4217CurrencyCode` custom validator that validates:
+- [x] Step 1: Add `POST /api-keys/:id/rotate` endpoint in `api-keys.controller.ts`
+- [x] Step 2: Create `payment-timeline.dto.ts` for timeline event types
+- [x] Step 3: Add `getTimeline()` method in `payments.service.ts`
+- [x] Step 4: Add `GET /payments/:id/timeline` endpoint in `payments.controller.ts`
 
-  - ISO 4217 code format (and correctness via internal allowlist)
-  - optional allowlist constraint based on env (`SUPPORTED_CURRENCIES`)
-- [x] Step 3: Update `CreatePaymentDto` to use the new validator for `currency`
+## Summary
 
-- [x] Step 4: Ensure unsupported/invalid currencies return HTTP **422** with descriptive error message
+### 1. POST /v1/api-keys/:id/rotate
+- **File**: `src/modules/api-keys/api-keys.controller.ts`
+- **Description**: Revokes the current API key and creates a new one with the same name, scope, and environment settings. Returns `{ apiKey, plaintext }`.
+- **Auth**: Requires JWT bearer token (uses `@CurrentUser()` decorator)
+- **Service method**: `ApiKeysService.rotate(id, userId)` — already existed, now wired to the endpoint
 
-- [x] Step 5: Add `GET /v1/currencies` endpoint that returns the supported currency list from env
-- [x] Step 6: Update Swagger decorators/examples for the new endpoint and DTO
-- [x] Step 7: Update/extend e2e tests (`test/payments.e2e-spec.ts`) for:
-  - invalid ISO currency -> 422
-  - valid but unsupported currency -> 422
-  - GET /v1/currencies -> returns current env list
-- [ ] Step 8: Run e2e tests locally and fix any regressions
+### 2. GET /v1/payments/:id/timeline
+- **Files**: 
+  - `src/modules/payments/dto/payment-timeline.dto.ts` (new)
+  - `src/modules/payments/payments.service.ts` (new `getTimeline()` method)
+  - `src/modules/payments/payments.controller.ts` (new `@Get(':id/timeline')` endpoint)
+- **Description**: Returns a chronological array of events for a payment, including:
+  - `payment.created` — payment creation
+  - `payment.status_updated` — status transitions
+  - `payment.cancelled` — cancellation
+  - `payment.expired` — expiry
+  - `refund.created` — each refund issued
+  - `dispute.opened` / `dispute.resolved` / `dispute.closed` — dispute lifecycle
+- **Auth**: Requires JWT bearer token
 

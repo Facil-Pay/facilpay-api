@@ -54,6 +54,7 @@ import { BulkCreatePaymentsResponseDto } from './dto/bulk-create-payments-respon
 import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
+import { PaymentTimelineEvent } from './dto/payment-timeline.dto';
 import { Payment } from './payment.entity';
 import { Refund } from './refund.entity';
 import { SortOrder } from '../../common/dto/pagination.dto';
@@ -689,6 +690,42 @@ export class PaymentsController {
   })
   cancel(@Param('id') id: string) {
     return this.paymentsService.cancel(id);
+  }
+
+  @Get(':id/timeline')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Get payment timeline',
+    description:
+      'Returns a chronological timeline of events for a payment, including creation, status updates, cancellation, expiry, refunds, and dispute lifecycle events.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Payment UUID',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiOkResponse({
+    description: 'Payment timeline events.',
+    schema: {
+      example: [
+        {
+          type: 'payment.created',
+          timestamp: '2026-01-26T10:00:00.000Z',
+          data: { amount: 100.5, currency: 'USD', status: 'PENDING', description: 'Payment for order #12345' },
+        },
+        {
+          type: 'payment.status_updated',
+          timestamp: '2026-01-26T10:05:00.000Z',
+          data: { status: 'COMPLETED' },
+        },
+      ],
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
+  async getTimeline(@Param('id') id: string): Promise<PaymentTimelineEvent[]> {
+    return this.paymentsService.getTimeline(id);
   }
 
   @Sse(':id/events')
