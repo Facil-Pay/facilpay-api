@@ -19,3 +19,8 @@ export const DefaultThrottle = () => Throttle({ default: 100 } as any);
  * Apply bulk payment throttle limit (20 requests per minute)
  */
 export const BulkThrottle = () => Throttle({ bulk: 20 } as any);
+
+/**
+ * Apply QR code generation throttle limit (20 requests per minute)
+ */
+export const QrThrottle = () => Throttle({ qr: 20 } as any);
