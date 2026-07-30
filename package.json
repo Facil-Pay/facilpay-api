@@ -52,6 +52,7 @@
     "geoip-lite": "^1.4.10",
     "handlebars": "^4.7.9",
     "ioredis": "^5.10.1",
+    "ip-range-check": "^0.2.0",
     "nodemailer": "^8.0.5",
     "otplib": "^13.4.1",
     "passport": "^0.7.0",
