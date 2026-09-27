@@ -186,3 +186,7 @@ Environment variables:
 │   └── health/
 
 ```
+
+## 📚 Documentation
+
+- [Recurring Payments](docs/RECURRING_PAYMENTS.md) — recurring payment plans API
