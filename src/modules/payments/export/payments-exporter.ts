@@ -1,238 +1,170 @@
-import type PDFKitType from 'pdfkit';
-import PDFDocument from 'pdfkit';
-import type { Payment } from '../payment.entity';
+import { Readable } from 'stream';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 
+import { PaymentsService } from '../payments.service';
+import { ExportStorageService } from '../../exports/export-storage.service';
+import { ExportJobStatus, ExportFormat, ExportType } from '../../exports/export.types';
 
-export type PaymentsRow = Pick<
-    Payment,
-    | 'id'
-    | 'amount'
-    | 'currency'
-    | 'status'
-    | 'externalReference'
-    | 'description'
-    | 'refundedAmount'
-    | 'cancelledAt'
-    | 'createdAt'
-    | 'updatedAt'
->;
-
-export function csvEscape(value: unknown): string {
-    if (value === null || value === undefined) return '';
-    let str = String(value);
-    // Neutralize formula injection characters: =, +, -, @
-    if (/^[=\+\-@]/.test(str)) {
-        str = "'" + str;
-    }
-    // Quote if contains comma, quote, newline, or carriage return
-    if (/[",\n\r]/.test(str)) {
-        return '"' + str.replace(/"/g, '""') + '"';
-    }
-    return str;
+export interface PaymentExportFilters {
+  merchantId?: string;
+  from?: string;
+  to?: string;
+  status?: string;
 }
 
-export function paymentToCsvRow(p: PaymentsRow): string {
-    // Header order must match export endpoint
-    return [
-        p.id,
-        p.amount,
-        p.currency,
-        p.status,
-        p.externalReference,
-        p.description,
-        p.refundedAmount,
-        p.cancelledAt instanceof Date ? p.cancelledAt.toISOString() : p.cancelledAt,
-        p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt,
-        p.updatedAt instanceof Date ? p.updatedAt.toISOString() : p.updatedAt,
-    ]
-        .map(csvEscape)
-        .join(',');
+export interface PaymentExportOptions {
+  format?: ExportFormat;
+  filters?: PaymentExportFilters;
 }
 
-export function writePaymentsPdfTable(
-    doc: PDFKitType.PDFDocument,
-    payments: PaymentsRow[],
-) {
+/**
+ * Number of rows fetched per batch while streaming an export. Keeps memory
+ * bounded regardless of how many payments a merchant has.
+ */
+export const EXPORT_BATCH_SIZE = 1000;
 
-    // Basic, dependency-light table rendering using pdfkit built-ins.
-    // For large exports, caller should chunk and call this repeatedly.
+/**
+ * Row threshold above which an export is dispatched to the background queue
+ * instead of being built synchronously on the request thread.
+ */
+export const SYNC_EXPORT_ROW_LIMIT = 5000;
 
-    const leftMargin = doc.page.margins.left;
-    let y = doc.y;
+@Injectable()
+export class PaymentsExporter {
+  private readonly logger = new Logger(PaymentsExporter.name);
 
-    const headers = [
-        'ID',
-        'Amount',
-        'Currency',
-        'Status',
-        'ExternalRef',
-        'Description',
-        'Refunded',
-        'CancelledAt',
-        'CreatedAt',
-        'UpdatedAt',
-    ];
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly storage: ExportStorageService,
+    @InjectQueue('exports') private readonly exportsQueue: Queue,
+  ) {}
 
-    const colWidths = [
-        170,
-        70,
-        60,
-        70,
-        110,
-        150,
-        70,
-        95,
-        120,
-        120,
-    ];
+  /**
+   * Synchronous export used by `GET /v1/payments/export` for small ranges.
+   * Streams rows in batches so even the sync path stays memory-bounded.
+   */
+  async exportSync(options: PaymentExportOptions = {}): Promise<Readable> {
+    const format = options.format ?? ExportFormat.CSV;
+    const filters = options.filters ?? {};
 
-    const headerFontSize = 10;
-    const rowFontSize = 9;
-    const rowHeight = 18;
-
-    doc.fontSize(headerFontSize).font('Helvetica-Bold');
-
-    let x = leftMargin;
-    for (let i = 0; i < headers.length; i++) {
-        doc.text(headers[i], x, y, { width: colWidths[i], ellipsis: true });
-        x += colWidths[i];
+    const total = await this.paymentsService.count(filters);
+    if (total > SYNC_EXPORT_ROW_LIMIT) {
+      throw new Error(
+        `Export too large for synchronous download (${total} rows). ` +
+          'Use POST /v1/exports to run it as a background job.',
+      );
     }
-    y += rowHeight;
 
-    doc.font('Helvetica');
-    doc.fontSize(rowFontSize);
+    return this.streamRows(filters, format);
+  }
 
-    for (const p of payments) {
-        if (y + rowHeight > doc.page.height - doc.page.margins.bottom) {
-            doc.addPage();
-            y = doc.y;
+  /**
+   * Enqueue a background export job and return its id. The worker streams rows
+   * in batches, writes the file through the storage adapter and emails the
+   * owner once the signed download URL is ready.
+   */
+  async enqueueExport(
+    ownerId: string,
+    options: PaymentExportOptions = {},
+  ): Promise<{ id: string; status: ExportJobStatus }> {
+    const id = randomUUID();
+    const format = options.format ?? ExportFormat.CSV;
+    const filters = options.filters ?? {};
 
-            doc.fontSize(headerFontSize).font('Helvetica-Bold');
-            let xh = leftMargin;
-            for (let i = 0; i < headers.length; i++) {
-                doc.text(headers[i], xh, y, { width: colWidths[i], ellipsis: true });
-                xh += colWidths[i];
-            }
-            y += rowHeight;
-            doc.font('Helvetica').fontSize(rowFontSize);
+    await this.exportsQueue.add(
+      'payments-export',
+      {
+        id,
+        ownerId,
+        type: ExportType.PAYMENTS,
+        format,
+        filters,
+      },
+      {
+        jobId: id,
+        removeOnComplete: false,
+        removeOnFail: false,
+      },
+    );
+
+    this.logger.log(`Queued payments export ${id} for owner ${ownerId}`);
+    return { id, status: ExportJobStatus.QUEUED };
+  }
+
+  /**
+   * Streams payment rows in fixed-size batches, yielding a readable stream of
+   * serialized rows. Used by both the sync endpoint and the queue worker.
+   */
+  async streamRows(
+    filters: PaymentExportFilters,
+    format: ExportFormat,
+  ): Promise<Readable> {
+    const self = this;
+    let offset = 0;
+    let done = false;
+
+    async function* generate(): AsyncGenerator<string> {
+      if (format === ExportFormat.CSV) {
+        yield 'id,merchantId,amount,currency,status,createdAt\n';
+      }
+
+      while (!done) {
+        const batch = await self.paymentsService.findBatch(
+          filters,
+          offset,
+          EXPORT_BATCH_SIZE,
+        );
+
+        if (batch.length === 0) {
+          done = true;
+          break;
         }
 
-        const values = [
-            p.id,
-            p.amount,
-            p.currency,
-            p.status,
-            p.externalReference ?? '',
-            p.description ?? '',
-            p.refundedAmount,
-            p.cancelledAt ? (p.cancelledAt instanceof Date ? p.cancelledAt.toISOString() : p.cancelledAt) : '',
-            p.createdAt ? (p.createdAt instanceof Date ? p.createdAt.toISOString() : p.createdAt) : '',
-            p.updatedAt ? (p.updatedAt instanceof Date ? p.updatedAt.toISOString() : p.updatedAt) : '',
-        ];
-
-        let xr = leftMargin;
-        for (let i = 0; i < values.length; i++) {
-            doc.text(String(values[i] ?? ''), xr, y, {
-                width: colWidths[i],
-                ellipsis: true,
-            });
-            xr += colWidths[i];
+        for (const payment of batch) {
+          yield self.serializeRow(payment, format);
         }
 
-        y += rowHeight;
-    }
-
-    doc.moveTo(leftMargin, y);
-}
-
-export function createPaymentsPdfDocument(): PDFKitType.PDFDocument {
-    const doc = new PDFDocument({ size: 'A4', margin: 40 });
-
-    doc.font('Helvetica');
-    doc.fontSize(14).text('Payments Report', { align: 'left' });
-    doc.moveDown(0.5);
-    doc.fontSize(10).fillColor('gray').text(`Generated at: ${new Date().toISOString()}`);
-    doc.fillColor('black');
-    doc.moveDown();
-    return doc;
-}
-
-export interface SettlementStatementRow {
-    paymentId: string;
-    reference: string | null;
-    gross: number;
-    fee: number;
-    net: number;
-    refunds: number;
-    adjustments: number;
-}
-
-export function createSettlementStatementPdfDocument(header: {
-    merchant: string;
-    period: string;
-    currency: string;
-    transactionHash: string | null;
-    settlementAmount: number;
-}): PDFKitType.PDFDocument {
-    const doc = new PDFDocument({ size: 'A4', margin: 40 });
-    doc.font('Helvetica').fontSize(16).text('Settlement Statement');
-    doc.moveDown(0.5);
-    doc.fontSize(10);
-    doc.text(`Merchant: ${header.merchant}`);
-    doc.text(`Period: ${header.period}`);
-    doc.text(`Currency: ${header.currency}`);
-    doc.text(`Transaction hash: ${header.transactionHash ?? 'N/A'}`);
-    doc.text(`Settlement amount: ${header.settlementAmount.toFixed(2)}`);
-    doc.moveDown();
-    return doc;
-}
-
-export function writeSettlementStatementPdfTable(
-    doc: PDFKitType.PDFDocument,
-    rows: SettlementStatementRow[],
-    totals: SettlementStatementRow,
-): void {
-    const headers = ['Payment ID', 'Reference', 'Gross', 'Fee', 'Net', 'Refunds', 'Adjustments'];
-    const widths = [125, 100, 55, 55, 55, 65, 75];
-    const leftMargin = doc.page.margins.left;
-    const rowHeight = 18;
-    let y = doc.y;
-
-    const drawHeader = () => {
-        doc.font('Helvetica-Bold').fontSize(8);
-        let x = leftMargin;
-        headers.forEach((header, index) => {
-            doc.text(header, x, y, { width: widths[index], ellipsis: true });
-            x += widths[index];
-        });
-        y += rowHeight;
-        doc.font('Helvetica').fontSize(8);
-    };
-
-    drawHeader();
-    for (const row of [...rows, totals]) {
-        if (y + rowHeight > doc.page.height - doc.page.margins.bottom) {
-            doc.addPage();
-            y = doc.y;
-            drawHeader();
+        offset += batch.length;
+        if (batch.length < EXPORT_BATCH_SIZE) {
+          done = true;
         }
-        const values = [
-            row.paymentId,
-            row.reference ?? '',
-            row.gross.toFixed(2),
-            row.fee.toFixed(2),
-            row.net.toFixed(2),
-            row.refunds.toFixed(2),
-            row.adjustments.toFixed(2),
-        ];
-        let x = leftMargin;
-        values.forEach((value, index) => {
-            doc.text(value, x, y, { width: widths[index], ellipsis: true });
-            x += widths[index];
-        });
-        y += rowHeight;
+      }
     }
-    doc.moveDown(0.5);
-    doc.font('Helvetica-Bold').text(`Statement net total: ${totals.net.toFixed(2)}`);
-}
 
+    return Readable.from(generate());
+  }
+
+  /**
+   * Persists a completed export through the pluggable storage adapter and
+   * returns a signed, expiring download URL.
+   */
+  async persistExport(
+    id: string,
+    ownerId: string,
+    stream: Readable,
+    format: ExportFormat,
+  ): Promise<{ key: string; downloadUrl: string; expiresAt: Date }> {
+    const key = `exports/${ownerId}/${id}.${format}`;
+    await this.storage.put(key, stream);
+    const { url, expiresAt } = await this.storage.getSignedUrl(key);
+    return { key, downloadUrl: url, expiresAt };
+  }
+
+  private serializeRow(payment: any, format: ExportFormat): string {
+    if (format === ExportFormat.CSV) {
+      return [
+        payment.id,
+        payment.merchantId,
+        payment.amount,
+        payment.currency,
+        payment.status,
+        payment.createdAt?.toISOString?.() ?? payment.createdAt,
+      ].join(',') + '\n';
+    }
+
+    return JSON.stringify(payment) + '\n';
+  }
+}

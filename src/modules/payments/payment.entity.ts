@@ -19,6 +19,11 @@ export enum PaymentStatus {
   OVERDUE = 'OVERDUE',
 }
 
+export enum OverpaymentPolicy {
+  KEEP = 'KEEP',
+  AUTO_REFUND = 'AUTO_REFUND',
+}
+
 @Entity('payments')
 @Index('IDX_payments_customerId_createdAt', ['customerId', 'createdAt'])
 export class Payment {
@@ -49,6 +54,16 @@ export class Payment {
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   refundedAmount: number;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  overpaidAmount: number;
+
+  @Column({
+    type: 'enum',
+    enum: OverpaymentPolicy,
+    default: OverpaymentPolicy.KEEP,
+  })
+  overpaymentPolicy: OverpaymentPolicy;
 
   @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
   feeAmount: number;
@@ -92,6 +107,10 @@ export class Payment {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, string> | null = null;
+
+  @Index('IDX_payments_tags', { synchronize: false })
+  @Column({ type: 'text', array: true, default: () => "'{}'" })
+  tags: string[] = [];
 
   @Index()
   @Column({ nullable: true })

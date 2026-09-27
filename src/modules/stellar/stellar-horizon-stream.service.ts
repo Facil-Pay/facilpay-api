@@ -178,10 +178,11 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
 
     if (!payment) return null;
 
-    if (Math.abs(Number(payment.amount) - amountNum) > 0.001) {
+    const expected = Number(payment.amount);
+    if (amountNum < expected - 0.001) {
       this.logger.warn(
-        { expected: Number(payment.amount), received: amountNum, memo },
-        'Memo matched but amount mismatch — transaction not auto-confirmed',
+        { expected, received: amountNum, memo },
+        'Memo matched but amount underpaid — transaction not auto-confirmed',
       );
       return null;
     }
@@ -194,10 +195,23 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
     transactionHash: string,
   ): Promise<void> {
     try {
+      const received = Number(payment.receivedAmount ?? payment.amount);
+      const expected = Number(payment.amount);
+      const overpaid = received - expected;
+
       payment.status = PaymentStatus.COMPLETED;
       if (!payment.externalReference) {
         payment.externalReference = transactionHash;
       }
+
+      if (overpaid > 0.001) {
+        payment.overpaidAmount = overpaid;
+        this.logger.warn(
+          { paymentId: payment.id, expected, received, overpaid },
+          'Overpayment detected on Stellar payment',
+        );
+      }
+
       await this.paymentRepository.save(payment);
       this.logger.log(
         { paymentId: payment.id, transactionHash },

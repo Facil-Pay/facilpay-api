@@ -1,11 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import {
   IsOptional,
   IsString,
   IsEnum,
   IsISO8601,
   IsObject,
+  IsArray,
+  ArrayMaxSize,
+  Matches,
 } from 'class-validator';
 import { PaymentStatus } from '../payment.entity';
 import { PaginationDto, SortOrder } from '../../../common/dto/pagination.dto';
@@ -101,4 +104,27 @@ export class GetPaymentsDto extends PaginationDto {
   @IsObject()
   @IsOptional()
   metadata?: Record<string, string>;
+
+  @ApiPropertyOptional({
+    description: 'Filter by tags (any-of match)',
+    type: 'array',
+    items: { type: 'string' },
+    example: ['wholesale', 'event-2026'],
+  })
+  @Transform(({ value }) => {
+    const raw = Array.isArray(value) ? value : [value];
+    return raw
+      .filter((tag): tag is string => typeof tag === 'string')
+      .map((tag) => tag.trim().toLowerCase())
+      .filter((tag) => tag.length > 0);
+  })
+  @IsArray()
+  @ArrayMaxSize(10, { message: 'tags must contain at most 10 items' })
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    each: true,
+    message:
+      'each tag must be a lowercase slug of at most 32 characters (letters, numbers, hyphens)',
+  })
+  @IsOptional()
+  tags?: string[];
 }

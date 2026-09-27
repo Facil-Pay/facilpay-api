@@ -189,4 +189,5 @@ Environment variables:
 
 ## 📚 Documentation
 
-- [Recurring Payments](docs/RECURRING_PAYMENTS.md) — recurring payment plans API
+- [Sessions](docs/SESSIONS.md) — session listing and revocation
+
