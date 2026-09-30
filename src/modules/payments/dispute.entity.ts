@@ -74,6 +74,7 @@ export class Dispute {
   @Column({ nullable: true })
   payerEmail: string | null;
 
+  @Index()
   @CreateDateColumn()
   createdAt: Date;
 

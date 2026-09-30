@@ -146,6 +146,7 @@ export class Payment {
   @Column({ default: true })
   remindersEnabled: boolean = true;
 
+  @Index()
   @CreateDateColumn()
   createdAt: Date;
 

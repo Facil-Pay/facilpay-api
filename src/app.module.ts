@@ -33,6 +33,8 @@ import { InvoicesModule } from './modules/invoices/invoices.module';
 import { CouponsModule } from './modules/coupons/coupons.module';
 import { TeamModule } from './modules/team/team.module';
 
+import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
