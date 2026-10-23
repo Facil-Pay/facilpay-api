@@ -236,3 +236,8 @@ Environment variables:
 - [Exports](docs/EXPORTS.md) — background export jobs
 - [Notifications](docs/NOTIFICATIONS.md) — in-app notification centre and email preferences
 - [Environment](docs/ENVIRONMENT.md) — environment variable reference
+
+## Handsoff notes
+
+<!-- handsoff-issue-511 -->
+- #511: Add global search endpoint GET /v1/search
