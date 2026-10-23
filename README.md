@@ -234,4 +234,5 @@ Environment variables:
 - [Customers](docs/CUSTOMERS.md) — customer CRUD and payment history
 - [Checkout Sessions](docs/CHECKOUT_SESSIONS.md) — hosted checkout sessions
 - [Exports](docs/EXPORTS.md) — background export jobs
+- [Notifications](docs/NOTIFICATIONS.md) — in-app notification centre and email preferences
 - [Environment](docs/ENVIRONMENT.md) — environment variable reference

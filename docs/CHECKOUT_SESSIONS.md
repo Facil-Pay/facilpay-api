@@ -517,6 +517,19 @@ Migration: `1751300000004-CreateCheckoutSessionsTable.ts`
 
 ---
 
+## Webhooks
+
+Checkout session lifecycle events are delivered via webhooks. Subscribe to them when creating or updating a webhook endpoint (see [Webhooks](WEBHOOKS.md)).
+
+| Event                       | Fired when                                                                 |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `checkout.session.completed` | The payer completes payment and the session transitions `OPEN` → `COMPLETE` |
+| `checkout.session.expired`  | An open session is expired manually or by the 10-minute cron job            |
+
+Both events fire at most once per session. The payload includes the session ID, public ID, and (for completion) the resulting payment ID.
+
+---
+
 ## See Also
 
 - [Payments](../README.md#payments) — Payment creation after checkout

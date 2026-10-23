@@ -36,6 +36,15 @@ export const WEBHOOK_EVENT_TYPES = [
   'payout.created',
   'payout.completed',
   'payout.failed',
+  'invoice.sent',
+  'invoice.paid',
+  'invoice.overdue',
+  'invoice.voided',
+  'customer.created',
+  'customer.updated',
+  'customer.deleted',
+  'checkout.session.completed',
+  'checkout.session.expired',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];

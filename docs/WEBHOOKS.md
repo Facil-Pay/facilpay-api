@@ -29,6 +29,15 @@ All webhook management endpoints live under `/v1/webhooks` and require a valid J
 | `settlement.created`     | A settlement is created                      |
 | `settlement.completed`   | A settlement payout completes successfully   |
 | `settlement.failed`      | A settlement payout fails                    |
+| `invoice.sent`           | An invoice transitions from `DRAFT` to `OPEN` (sent to customer) |
+| `invoice.paid`           | An invoice is marked `PAID` after a linked payment completes    |
+| `invoice.overdue`        | An open invoice passes its due date and becomes `OVERDUE`       |
+| `invoice.voided`         | An invoice is voided (via delete on draft or void on open/overdue) |
+| `customer.created`       | A new customer is created for a merchant                              |
+| `customer.updated`       | An existing customer's details are updated                            |
+| `customer.deleted`       | A customer is soft-deleted                                           |
+| `checkout.session.completed` | A hosted checkout session completes and a payment is created   |
+| `checkout.session.expired`  | A checkout session expires (manually or via the 10-minute cron) |
 
 ## Endpoint Management
 
@@ -326,6 +335,99 @@ Refund lifecycle events use this payload shape:
   }
 }
 ```
+
+### Invoice Lifecycle Payloads
+
+All four `invoice.*` events share the same payload shape — the `status` field reflects the new state:
+
+```json
+{
+  "event": "invoice.sent",
+  "timestamp": "2026-01-26T10:05:00.000Z",
+  "data": {
+    "invoiceId": "123e4567-e89b-12d3-a456-426614174000",
+    "number": "INV-000001",
+    "customerEmail": "buyer@example.com",
+    "customerName": "Buyer",
+    "currency": "USD",
+    "subtotal": "100.00",
+    "taxRate": "10.00",
+    "taxAmount": "10.00",
+    "total": "110.00",
+    "dueDate": "2030-01-01T00:00:00.000Z",
+    "status": "OPEN",
+    "paymentId": null,
+    "lineItems": [
+      {
+        "description": "Consulting",
+        "quantity": "2",
+        "unitPrice": "50.00",
+        "amount": "100.00",
+        "productId": null
+      }
+    ]
+  }
+}
+```
+
+| Event             | `status` value | Fired when                                                        |
+| ----------------- | -------------- | ----------------------------------------------------------------- |
+| `invoice.sent`    | `OPEN`         | `POST /v1/invoices/:id/send` transitions a draft invoice to open |
+| `invoice.paid`    | `PAID`         | A linked payment completes and marks the invoice paid            |
+| `invoice.overdue` | `OVERDUE`      | An open invoice passes its due date (lazy on read or daily cron) |
+| `invoice.voided`  | `VOID`         | `DELETE /v1/invoices/:id` (draft) or `POST /v1/invoices/:id/void` |
+
+### Customer Lifecycle Payloads
+
+All three `customer.*` events share the same payload shape:
+
+```json
+{
+  "event": "customer.created",
+  "timestamp": "2026-01-26T10:05:00.000Z",
+  "data": {
+    "customerId": "123e4567-e89b-12d3-a456-426614174000",
+    "merchantId": "abc123-merchant-uuid",
+    "email": "buyer@example.com",
+    "name": "Jane Doe",
+    "phone": "+1234567890",
+    "metadata": { "tier": "gold" },
+    "createdAt": "2026-01-26T10:00:00.000Z",
+    "updatedAt": "2026-01-26T10:05:00.000Z"
+  }
+}
+```
+
+| Event               | Fired when                                            |
+| ------------------- | ---------------------------------------------------- |
+| `customer.created`  | `POST /v1/customers` creates a new customer          |
+| `customer.updated`  | `PATCH /v1/customers/:id` updates customer details   |
+| `customer.deleted`  | `DELETE /v1/customers/:id` soft-deletes a customer   |
+
+### Checkout Session Payloads
+
+Both `checkout.session.*` events use a lightweight payload referencing the session and (for completion) the resulting payment:
+
+```json
+{
+  "event": "checkout.session.completed",
+  "timestamp": "2026-01-26T10:05:00.000Z",
+  "data": {
+    "sessionId": "123e4567-e89b-12d3-a456-426614174000",
+    "publicId": "abc123def456ghi789jkl012",
+    "paymentId": "pay_abc123",
+    "completedAt": "2026-01-26T10:05:00.000Z",
+    "customerEmail": "buyer@example.com"
+  }
+}
+```
+
+| Event                       | Fired when                                                    |
+| --------------------------- | ------------------------------------------------------------ |
+| `checkout.session.completed` | `POST /v1/checkout/sessions/:publicId/complete` creates a payment and marks the session `COMPLETE` |
+| `checkout.session.expired`  | Manual `POST /v1/checkout/sessions/:id/expire` or the 10-minute cron marks an `OPEN` session `EXPIRED` |
+
+The `expired` payload replaces `paymentId`/`completedAt`/`customerEmail` with `expiredAt`.
 
 ## Request Headers
 

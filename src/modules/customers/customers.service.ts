@@ -43,7 +43,9 @@ export class CustomersService {
       tags: this.normalizeTags(dto.tags),
     });
 
-    return this.saveWithoutDuplicateEmail(customer);
+    const saved = await this.saveWithoutDuplicateEmail(customer);
+    await this.dispatchCustomerEvent('customer.created', saved);
+    return saved;
   }
 
   async findAll(
@@ -118,12 +120,15 @@ export class CustomersService {
       customer.tags = this.normalizeTags(dto.tags);
     }
 
-    return this.saveWithoutDuplicateEmail(customer);
+    const saved = await this.saveWithoutDuplicateEmail(customer);
+    await this.dispatchCustomerEvent('customer.updated', saved);
+    return saved;
   }
 
   async remove(id: string, merchantId: string): Promise<void> {
     const customer = await this.findOne(id, merchantId);
     await this.customerRepository.softDelete(customer.id);
+    await this.dispatchCustomerEvent('customer.deleted', customer);
   }
 
   /**
@@ -253,5 +258,14 @@ export class CustomersService {
     const driverError = (error as { driverError?: { code?: string } })
       .driverError;
     return driverError?.code === '23505';
+  }
+
+  private async dispatchCustomerEvent(event: string, customer: Customer): Promise<void> {
+    try {
+      const payload = serializeCustomer(customer);
+      await this.webhooksService.dispatchEventToMerchant(customer.merchantId, event, payload);
+    } catch {
+      // Webhook delivery failures must not break the customer operation.
+    }
   }
 }

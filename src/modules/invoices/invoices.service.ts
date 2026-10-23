@@ -17,6 +17,8 @@ import { CreateInvoiceDto, UpdateInvoiceDto } from './dto/invoice.dto';
 import { ProductsService } from '../products/products.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { PaymentsService } from '../payments/payments.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { serializeInvoice } from '../webhooks/payload-serializers/invoice.serializer';
 import { generateStandaloneInvoicePdf } from '../payments/export/invoice.generator';
 
 const money = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
@@ -31,6 +33,7 @@ export class InvoicesService {
     private readonly emailNotificationService: EmailNotificationService,
     private readonly paymentsService: PaymentsService,
     private readonly configService: ConfigService,
+    private readonly webhooksService: WebhooksService,
   ) {}
 
   async create(merchantId: string, dto: CreateInvoiceDto): Promise<Invoice> {
@@ -116,7 +119,9 @@ export class InvoicesService {
     const invoice = await this.findOne(merchantId, id);
     this.assertDraft(invoice);
     invoice.status = InvoiceStatus.VOID;
-    return this.invoiceRepository.save(invoice);
+    const saved = await this.invoiceRepository.save(invoice);
+    await this.dispatchInvoiceEvent('invoice.voided', saved);
+    return saved;
   }
 
   async send(merchantId: string, id: string): Promise<Invoice> {
@@ -134,6 +139,7 @@ export class InvoicesService {
       dueDate: invoice.dueDate.toISOString(),
       payUrl: `${baseUrl.replace(/\/$/, '')}/v1/public/invoices/${invoice.publicToken}`,
     });
+    await this.dispatchInvoiceEvent('invoice.sent', invoice);
     return invoice;
   }
 
@@ -143,7 +149,9 @@ export class InvoicesService {
       throw new ConflictException('Only open or overdue invoices can be voided');
     }
     invoice.status = InvoiceStatus.VOID;
-    return this.invoiceRepository.save(invoice);
+    const saved = await this.invoiceRepository.save(invoice);
+    await this.dispatchInvoiceEvent('invoice.voided', saved);
+    return saved;
   }
 
   async duplicate(merchantId: string, id: string): Promise<Invoice> {
@@ -220,7 +228,14 @@ export class InvoicesService {
   }
 
   async markPaid(invoiceId: string, paymentId: string): Promise<void> {
-    await this.invoiceRepository
+    const invoice = await this.invoiceRepository.findOne({
+      where: { id: invoiceId },
+      relations: { lineItems: true },
+    });
+    if (!invoice) return;
+    if (![InvoiceStatus.OPEN, InvoiceStatus.OVERDUE].includes(invoice.status)) return;
+
+    const result = await this.invoiceRepository
       .createQueryBuilder()
       .update(Invoice)
       .set({ status: InvoiceStatus.PAID, paymentId })
@@ -229,10 +244,25 @@ export class InvoicesService {
         statuses: [InvoiceStatus.OPEN, InvoiceStatus.OVERDUE],
       })
       .execute();
+
+    if (result.affected && result.affected > 0) {
+      invoice.status = InvoiceStatus.PAID;
+      invoice.paymentId = paymentId;
+      await this.dispatchInvoiceEvent('invoice.paid', invoice);
+    }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async markOverdueInvoices(): Promise<void> {
+    const overdueInvoices = await this.invoiceRepository.find({
+      where: { status: InvoiceStatus.OPEN },
+      relations: { lineItems: true },
+    });
+    const toMarkOverdue = overdueInvoices.filter(
+      (invoice) => invoice.dueDate < new Date(),
+    );
+    if (toMarkOverdue.length === 0) return;
+
     await this.invoiceRepository
       .createQueryBuilder()
       .update(Invoice)
@@ -240,6 +270,11 @@ export class InvoicesService {
       .where('status = :status', { status: InvoiceStatus.OPEN })
       .andWhere('"dueDate" < :now', { now: new Date() })
       .execute();
+
+    for (const invoice of toMarkOverdue) {
+      invoice.status = InvoiceStatus.OVERDUE;
+      await this.dispatchInvoiceEvent('invoice.overdue', invoice);
+    }
   }
 
   private async resolveLineItems(
@@ -283,7 +318,9 @@ export class InvoicesService {
   private async updateOverdueStatus(invoice: Invoice): Promise<Invoice> {
     if (invoice.status === InvoiceStatus.OPEN && invoice.dueDate < new Date()) {
       invoice.status = InvoiceStatus.OVERDUE;
-      return this.invoiceRepository.save(invoice);
+      const saved = await this.invoiceRepository.save(invoice);
+      await this.dispatchInvoiceEvent('invoice.overdue', saved);
+      return saved;
     }
     return invoice;
   }
@@ -291,6 +328,15 @@ export class InvoicesService {
   private assertDraft(invoice: Invoice): void {
     if (invoice.status !== InvoiceStatus.DRAFT) {
       throw new ConflictException('Only draft invoices can be edited');
+    }
+  }
+
+  private async dispatchInvoiceEvent(event: string, invoice: Invoice): Promise<void> {
+    try {
+      const payload = serializeInvoice(invoice);
+      await this.webhooksService.dispatchEventToMerchant(invoice.merchantId, event, payload);
+    } catch {
+      // Webhook delivery failures must not break the invoice state transition.
     }
   }
 

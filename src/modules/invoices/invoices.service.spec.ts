@@ -7,6 +7,9 @@ describe('InvoicesService', () => {
   let service: InvoicesService;
   let repository: any;
   let paymentsService: any;
+  let webhooksService: any;
+  let emailNotificationService: any;
+  let configService: any;
 
   const makeInvoice = (overrides: Partial<Invoice> = {}) => ({
     id: 'invoice-id',
@@ -32,16 +35,22 @@ describe('InvoicesService', () => {
   beforeEach(() => {
     repository = {
       findOne: jest.fn(),
+      find: jest.fn(),
       save: jest.fn(async (invoice) => invoice),
       createQueryBuilder: jest.fn(),
     };
     paymentsService = { createForInvoice: jest.fn() };
+    emailNotificationService = { sendInvoiceCreated: jest.fn().mockResolvedValue(undefined) };
+    configService = { get: jest.fn().mockReturnValue('http://localhost:3000') };
+    webhooksService = { dispatchEventToMerchant: jest.fn().mockResolvedValue(undefined) };
     service = new InvoicesService(
       repository,
-      {} as any,
-      { sendInvoiceCreated: jest.fn() } as any,
+      {} as any, // dataSource
+      {} as any, // productsService
+      emailNotificationService,
       paymentsService,
-      { get: jest.fn() } as any,
+      configService,
+      webhooksService,
     );
   });
 
@@ -113,6 +122,8 @@ describe('InvoicesService', () => {
   });
 
   it('marks an open invoice paid with the completing payment ID', async () => {
+    const invoice = makeInvoice({ status: InvoiceStatus.OPEN, lineItems: [] });
+    repository.findOne.mockResolvedValue(invoice);
     const builder: any = {};
     builder.update = jest.fn().mockReturnValue(builder);
     builder.set = jest.fn().mockReturnValue(builder);
@@ -159,5 +170,199 @@ describe('InvoicesService', () => {
     const pdf = Buffer.concat(chunks);
     expect(pdf.subarray(0, 4).toString()).toBe('%PDF');
     expect(pdf.length).toBeGreaterThan(500);
+  });
+
+  // ── Webhook dispatch tests ──────────────────────────────────────────────
+
+  describe('webhook dispatch', () => {
+    it('dispatches invoice.sent when an invoice is sent', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.DRAFT, customerEmail: 'buyer@example.com' });
+      repository.findOne.mockResolvedValue(invoice);
+
+      await service.send('merchant-id', 'invoice-id');
+
+      expect(invoice.status).toBe(InvoiceStatus.OPEN);
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.sent',
+        expect.objectContaining({
+          invoiceId: 'invoice-id',
+          status: InvoiceStatus.OPEN,
+          customerEmail: 'buyer@example.com',
+        }),
+      );
+    });
+
+    it('dispatches invoice.voided when an open invoice is voided', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.OPEN });
+      repository.findOne.mockResolvedValue(invoice);
+
+      await service.void('merchant-id', 'invoice-id');
+
+      expect(invoice.status).toBe(InvoiceStatus.VOID);
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.voided',
+        expect.objectContaining({
+          invoiceId: 'invoice-id',
+          status: InvoiceStatus.VOID,
+        }),
+      );
+    });
+
+    it('dispatches invoice.voided when a draft invoice is deleted', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.DRAFT });
+      repository.findOne.mockResolvedValue(invoice);
+
+      await service.remove('merchant-id', 'invoice-id');
+
+      expect(invoice.status).toBe(InvoiceStatus.VOID);
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.voided',
+        expect.objectContaining({
+          invoiceId: 'invoice-id',
+          status: InvoiceStatus.VOID,
+        }),
+      );
+    });
+
+    it('dispatches invoice.overdue when a fetched invoice is past due', async () => {
+      const invoice = makeInvoice({
+        status: InvoiceStatus.OPEN,
+        dueDate: new Date('2020-01-01T00:00:00.000Z'),
+      });
+      repository.findOne.mockResolvedValue(invoice);
+
+      await service.findOne('merchant-id', 'invoice-id');
+
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.overdue',
+        expect.objectContaining({
+          invoiceId: 'invoice-id',
+          status: InvoiceStatus.OVERDUE,
+        }),
+      );
+    });
+
+    it('dispatches invoice.overdue for each invoice marked by the cron job', async () => {
+      const overdue = makeInvoice({ id: 'inv-1', status: InvoiceStatus.OPEN, dueDate: new Date('2020-01-01') });
+      const notOverdue = makeInvoice({ id: 'inv-2', status: InvoiceStatus.OPEN, dueDate: new Date('2030-01-01') });
+      repository.find.mockResolvedValue([overdue, notOverdue]);
+      const builder: any = {};
+      builder.update = jest.fn().mockReturnValue(builder);
+      builder.set = jest.fn().mockReturnValue(builder);
+      builder.where = jest.fn().mockReturnValue(builder);
+      builder.andWhere = jest.fn().mockReturnValue(builder);
+      builder.execute = jest.fn().mockResolvedValue({ affected: 1 });
+      repository.createQueryBuilder.mockReturnValue(builder);
+
+      await service.markOverdueInvoices();
+
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledTimes(1);
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.overdue',
+        expect.objectContaining({ invoiceId: 'inv-1' }),
+      );
+    });
+
+    it('dispatches invoice.paid when markPaid transitions an open invoice', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.OPEN, lineItems: [] });
+      repository.findOne.mockResolvedValue(invoice);
+      const builder: any = {};
+      builder.update = jest.fn().mockReturnValue(builder);
+      builder.set = jest.fn().mockReturnValue(builder);
+      builder.where = jest.fn().mockReturnValue(builder);
+      builder.andWhere = jest.fn().mockReturnValue(builder);
+      builder.execute = jest.fn().mockResolvedValue({ affected: 1 });
+      repository.createQueryBuilder.mockReturnValue(builder);
+
+      await service.markPaid('invoice-id', 'payment-id');
+
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.paid',
+        expect.objectContaining({
+          invoiceId: 'invoice-id',
+          status: InvoiceStatus.PAID,
+          paymentId: 'payment-id',
+        }),
+      );
+    });
+
+    it('does not dispatch invoice.paid when the invoice is already paid', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.PAID, lineItems: [] });
+      repository.findOne.mockResolvedValue(invoice);
+      const builder: any = {};
+      builder.update = jest.fn().mockReturnValue(builder);
+      builder.set = jest.fn().mockReturnValue(builder);
+      builder.where = jest.fn().mockReturnValue(builder);
+      builder.andWhere = jest.fn().mockReturnValue(builder);
+      builder.execute = jest.fn().mockResolvedValue({ affected: 0 });
+      repository.createQueryBuilder.mockReturnValue(builder);
+
+      await service.markPaid('invoice-id', 'payment-id');
+
+      expect(webhooksService.dispatchEventToMerchant).not.toHaveBeenCalled();
+    });
+
+    it('does not dispatch when no invoices are overdue in the cron job', async () => {
+      repository.find.mockResolvedValue([]);
+      const builder: any = {};
+      builder.update = jest.fn().mockReturnValue(builder);
+      builder.set = jest.fn().mockReturnValue(builder);
+      builder.where = jest.fn().mockReturnValue(builder);
+      builder.andWhere = jest.fn().mockReturnValue(builder);
+      builder.execute = jest.fn().mockResolvedValue({ affected: 0 });
+      repository.createQueryBuilder.mockReturnValue(builder);
+
+      await service.markOverdueInvoices();
+
+      expect(webhooksService.dispatchEventToMerchant).not.toHaveBeenCalled();
+    });
+
+    it('does not dispatch invoice.overdue when the invoice is still within the due date', async () => {
+      const invoice = makeInvoice({
+        status: InvoiceStatus.OPEN,
+        dueDate: new Date('2030-01-01T00:00:00.000Z'),
+      });
+      repository.findOne.mockResolvedValue(invoice);
+
+      await service.findOne('merchant-id', 'invoice-id');
+
+      expect(webhooksService.dispatchEventToMerchant).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Payload serializer tests ─────────────────────────────────────────────
+
+  describe('invoice payload serializer', () => {
+    it('includes line items and formatted invoice number in the payload', async () => {
+      const invoice = makeInvoice({
+        number: 42,
+        status: InvoiceStatus.OPEN,
+        lineItems: [
+          { description: 'Consulting', quantity: '2', unitPrice: '50.00', amount: '100.00', productId: null } as any,
+        ],
+        paymentId: 'pay-123',
+      });
+      repository.findOne.mockResolvedValue(invoice);
+
+      await service.send('merchant-id', 'invoice-id');
+
+      const payload = webhooksService.dispatchEventToMerchant.mock.calls[0][2];
+      expect(payload.number).toBe('INV-000042');
+      expect(payload.lineItems).toHaveLength(1);
+      expect(payload.lineItems[0]).toEqual({
+        description: 'Consulting',
+        quantity: '2',
+        unitPrice: '50.00',
+        amount: '100.00',
+        productId: null,
+      });
+      expect(payload.paymentId).toBe('pay-123');
+    });
   });
 });
