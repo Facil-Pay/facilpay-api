@@ -49,7 +49,7 @@ export class TeamService {
 
     if (existingMember) {
       const now = new Date();
-      if (existingMember.expiresAt > now) {
+      if (!existingMember.revokedAt && existingMember.expiresAt > now) {
         throw new ConflictException(
           'An active invitation already exists for this email',
         );
@@ -114,6 +114,10 @@ export class TeamService {
       throw new BadRequestException('Invitation has already been accepted');
     }
 
+    if (invitation.revokedAt) {
+      throw new BadRequestException('Invitation has been revoked');
+    }
+
     if (invitation.expiresAt < new Date()) {
       throw new BadRequestException('Invitation has expired');
     }
@@ -166,6 +170,101 @@ export class TeamService {
     );
 
     return member;
+  }
+
+  async listPendingInvitations(
+    merchantId: string,
+    actorId: string = merchantId,
+  ): Promise<MerchantInvitation[]> {
+    await this.assertOwnerOrAdmin(merchantId, actorId);
+    const invitations = await this.invitationsRepo.find({
+      where: { merchantId },
+      order: { createdAt: 'DESC' },
+    });
+    const now = new Date();
+    return invitations.filter(
+      (inv) => !inv.acceptedAt && !inv.revokedAt && inv.expiresAt > now,
+    );
+  }
+
+  async resendInvitation(
+    merchantId: string,
+    invitationId: string,
+    actorId: string = merchantId,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<{ token: string; invitation: MerchantInvitation }> {
+    await this.assertOwnerOrAdmin(merchantId, actorId);
+    const invitation = await this.findOwnedInvitation(invitationId, merchantId);
+
+    if (invitation.acceptedAt) {
+      throw new BadRequestException('Invitation has already been accepted');
+    }
+    if (invitation.revokedAt) {
+      throw new BadRequestException('Cannot resend a revoked invitation');
+    }
+
+    const rawToken = randomBytes(32).toString('hex');
+    invitation.tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    invitation.expiresAt = new Date(
+      Date.now() + TeamService.INVITATION_TTL_HOURS * 60 * 60 * 1000,
+    );
+
+    const saved = await this.invitationsRepo.save(invitation);
+
+    await this.auditLogsService.record({
+      actorId,
+      actorType: 'user',
+      action: 'team.invitation.resent',
+      resourceType: 'merchant_invitation',
+      resourceId: invitation.id,
+      ipAddress,
+      userAgent,
+      metadata: { email: invitation.email, role: invitation.role, merchantId },
+    });
+
+    this.logger.info(
+      { invitationId: invitation.id, merchantId, email: invitation.email },
+      'Team invitation resent',
+    );
+
+    return { token: rawToken, invitation: saved };
+  }
+
+  async revokeInvitation(
+    merchantId: string,
+    invitationId: string,
+    actorId: string = merchantId,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<MerchantInvitation> {
+    await this.assertOwnerOrAdmin(merchantId, actorId);
+    const invitation = await this.findOwnedInvitation(invitationId, merchantId);
+
+    if (invitation.acceptedAt) {
+      throw new BadRequestException('Cannot revoke an already accepted invitation');
+    }
+
+    invitation.revokedAt = new Date();
+    const saved = await this.invitationsRepo.save(invitation);
+
+    await this.auditLogsService.record({
+      actorId,
+      actorType: 'user',
+      action: 'team.invitation.revoked',
+      resourceType: 'merchant_invitation',
+      resourceId: invitation.id,
+      ipAddress,
+      userAgent,
+      metadata: { email: invitation.email, role: invitation.role, merchantId },
+    });
+
+    this.logger.info(
+      { invitationId: invitation.id, merchantId, email: invitation.email },
+      'Team invitation revoked',
+    );
+
+    return saved;
   }
 
   async listMembers(merchantId: string): Promise<MerchantMember[]> {
@@ -260,5 +359,38 @@ export class TeamService {
     if (!member) throw new NotFoundException(`Team member ${memberId} not found`);
     if (member.merchantId !== merchantId) throw new ForbiddenException();
     return member;
+  }
+
+  private async findOwnedInvitation(
+    invitationId: string,
+    merchantId: string,
+  ): Promise<MerchantInvitation> {
+    const invitation = await this.invitationsRepo.findOne({
+      where: { id: invitationId },
+    });
+    if (!invitation) {
+      throw new NotFoundException(`Invitation ${invitationId} not found`);
+    }
+    if (invitation.merchantId !== merchantId) {
+      throw new ForbiddenException();
+    }
+    return invitation;
+  }
+
+  private async assertOwnerOrAdmin(
+    merchantId: string,
+    actorId: string,
+  ): Promise<void> {
+    if (actorId === merchantId) {
+      return;
+    }
+    const membership = await this.membersRepo.findOne({
+      where: { merchantId, userId: actorId },
+    });
+    if (!membership || membership.role !== TeamRole.ADMIN) {
+      throw new ForbiddenException(
+        'Only the account owner or an admin can manage team invitations',
+      );
+    }
   }
 }

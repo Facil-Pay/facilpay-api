@@ -44,6 +44,10 @@ export class MerchantInvitation {
   @ApiPropertyOptional({ example: null })
   acceptedAt: Date | null = null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  @ApiPropertyOptional({ example: null })
+  revokedAt: Date | null = null;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 }

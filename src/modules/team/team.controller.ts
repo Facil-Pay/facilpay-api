@@ -33,6 +33,7 @@ import { TeamService } from './team.service';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberRoleDto } from './dto/update-member-role.dto';
 import { MerchantMember } from './entities/merchant-member.entity';
+import { MerchantInvitation } from './entities/merchant-invitation.entity';
 
 @ApiTags('team')
 @ApiBearerAuth('bearer')
@@ -77,6 +78,78 @@ export class TeamController {
       user.id,
       req.ip,
       req.headers['user-agent'],
+    );
+  }
+
+  @Get('invitations')
+  @ApiOperation({
+    summary: 'List pending team invitations',
+    description: 'Returns pending (unaccepted, unrevoked, non-expired) invitations. Accessible only by the account owner or an ADMIN team member.',
+  })
+  @ApiOkResponse({ type: [MerchantInvitation] })
+  @ApiForbiddenResponse({ description: 'Only the account owner or an admin can list invitations' })
+  @ApiUnauthorizedResponse()
+  listInvitations(
+    @CurrentUser() user: User,
+    @Req() req?: Request,
+  ): Promise<MerchantInvitation[]> {
+    const merchantId = (req?.headers?.['x-merchant-id'] as string) || user.id;
+    return this.teamService.listPendingInvitations(merchantId, user.id);
+  }
+
+  @Post('invitations/:id/resend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend a pending team invitation',
+    description: 'Rotates the invitation token and extends its expiry. Accessible only by the account owner or an ADMIN team member.',
+  })
+  @ApiParam({ name: 'id', description: 'Invitation UUID' })
+  @ApiOkResponse({
+    description: 'Invitation token rotated and expiry extended.',
+  })
+  @ApiNotFoundResponse({ description: 'Invitation not found' })
+  @ApiBadRequestResponse({ description: 'Invitation already accepted or revoked' })
+  @ApiForbiddenResponse({ description: 'Only the account owner or an admin can resend invitations' })
+  @ApiUnauthorizedResponse()
+  resendInvitation(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Req() req?: Request,
+  ) {
+    const merchantId = (req?.headers?.['x-merchant-id'] as string) || user.id;
+    return this.teamService.resendInvitation(
+      merchantId,
+      id,
+      user.id,
+      req?.ip,
+      req?.headers?.['user-agent'],
+    );
+  }
+
+  @Delete('invitations/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Revoke a pending team invitation',
+    description: 'Marks a pending invitation as revoked so its token can no longer be accepted. Accessible only by the account owner or an ADMIN team member.',
+  })
+  @ApiParam({ name: 'id', description: 'Invitation UUID' })
+  @ApiOkResponse({ type: MerchantInvitation })
+  @ApiNotFoundResponse({ description: 'Invitation not found' })
+  @ApiBadRequestResponse({ description: 'Invitation already accepted' })
+  @ApiForbiddenResponse({ description: 'Only the account owner or an admin can revoke invitations' })
+  @ApiUnauthorizedResponse()
+  revokeInvitation(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+    @Req() req?: Request,
+  ): Promise<MerchantInvitation> {
+    const merchantId = (req?.headers?.['x-merchant-id'] as string) || user.id;
+    return this.teamService.revokeInvitation(
+      merchantId,
+      id,
+      user.id,
+      req?.ip,
+      req?.headers?.['user-agent'],
     );
   }
 
