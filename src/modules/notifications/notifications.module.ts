@@ -21,6 +21,12 @@ import { NotificationPreference } from './notification-preference.entity';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationPreferencesController } from './notification-preferences.controller';
 import { SlackNotificationService } from './slack-notification.service';
+import { VerifiedPhoneNumber } from './verified-phone-number.entity';
+import {
+  SMS_PROVIDER,
+  TwilioSmsProvider,
+  SmsNotificationService,
+} from './sms-notification.service';
 
 @Module({
   imports: [
@@ -29,6 +35,7 @@ import { SlackNotificationService } from './slack-notification.service';
       EmailSuppression,
       InAppNotification,
       NotificationPreference,
+      VerifiedPhoneNumber,
     ]),
     BullModule.registerQueue({
       name: 'emails',
@@ -76,6 +83,12 @@ import { SlackNotificationService } from './slack-notification.service';
     InAppNotificationsService,
     NotificationPreferencesService,
     SlackNotificationService,
+    TwilioSmsProvider,
+    {
+      provide: SMS_PROVIDER,
+      useExisting: TwilioSmsProvider,
+    },
+    SmsNotificationService,
   ],
   exports: [
     EmailService,
@@ -84,6 +97,8 @@ import { SlackNotificationService } from './slack-notification.service';
     InAppNotificationsService,
     NotificationPreferencesService,
     SlackNotificationService,
+    SmsNotificationService,
+    SMS_PROVIDER,
   ],
 })
 export class NotificationsModule {}

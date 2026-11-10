@@ -56,6 +56,44 @@ export class NotificationPreferencesService {
     return pref ? pref.email : true;
   }
 
+  async isSmsEnabled(
+    userId: string,
+    category: NotificationCategory,
+  ): Promise<boolean> {
+    if (category === NotificationCategory.SECURITY) {
+      return true;
+    }
+    const pref = await this.repo.findOne({ where: { userId, category } });
+    return pref && typeof pref.sms === 'boolean' ? pref.sms : true;
+  }
+
+  async updateSmsForUser(
+    userId: string,
+    updates: Partial<Record<NotificationCategory, boolean>>,
+  ): Promise<PreferenceMap> {
+    for (const [category, enabled] of Object.entries(updates) as [
+      NotificationCategory,
+      boolean,
+    ][]) {
+      if (category === NotificationCategory.SECURITY) {
+        continue;
+      }
+      await this.repo.upsert(
+        { userId, category, sms: enabled },
+        { conflictPaths: ['userId', 'category'] },
+      );
+    }
+    const rows = await this.repo.find({ where: { userId } });
+    const map = this.defaultMap();
+    for (const row of rows) {
+      if (typeof row.sms === 'boolean') {
+        map[row.category] = row.sms;
+      }
+    }
+    map[NotificationCategory.SECURITY] = true;
+    return map;
+  }
+
   private defaultMap(): PreferenceMap {
     return ALL_NOTIFICATION_CATEGORIES.reduce((acc, cat) => {
       acc[cat] = true;

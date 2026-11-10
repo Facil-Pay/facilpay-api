@@ -40,6 +40,10 @@ export class NotificationPreference {
   @ApiProperty({ example: true })
   email: boolean;
 
+  @Column({ default: true })
+  @ApiProperty({ example: true })
+  sms: boolean;
+
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;
 
