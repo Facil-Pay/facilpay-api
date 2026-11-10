@@ -21,9 +21,15 @@ export enum RefundReasonCode {
 
 export enum RefundStatus {
   PENDING = 'PENDING',
+  PENDING_APPROVAL = 'PENDING_APPROVAL',
+  SUBMITTED = 'SUBMITTED',
+  EXECUTED = 'EXECUTED',
   COMPLETED = 'COMPLETED',
   CLAIMABLE = 'CLAIMABLE',
   FAILED = 'FAILED',
+  REJECTED = 'REJECTED',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
 }
 
 @Entity('refunds')
@@ -56,9 +62,6 @@ export class Refund {
   @ApiPropertyOptional()
   reason: string;
 
-  @Column({ type: 'varchar', length: 16, default: RefundStatus.COMPLETED })
-  status: RefundStatus = RefundStatus.COMPLETED;
-
   @Column({ type: 'varchar', nullable: true })
   stellarTransactionHash: string | null = null;
 
@@ -76,6 +79,14 @@ export class Refund {
   })
   @ApiProperty({ enum: RefundStatus, default: RefundStatus.EXECUTED })
   status: RefundStatus;
+
+  @Column({ nullable: true })
+  @ApiPropertyOptional({ description: 'User ID of the user who cancelled the refund' })
+  cancelledBy: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  @ApiPropertyOptional()
+  cancelledAt: Date | null;
 
   @Column({ nullable: true })
   @ApiPropertyOptional({ description: 'User ID of the approver' })

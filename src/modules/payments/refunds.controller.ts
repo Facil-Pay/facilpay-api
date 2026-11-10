@@ -14,6 +14,7 @@ import {
 import {
   ApiBearerAuth,
   ApiBody,
+  ApiConflictResponse,
   ApiForbiddenResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -122,5 +123,21 @@ export class RefundsController {
     @Request() req: any,
   ) {
     return this.paymentsService.rejectRefund(id, req.user.id, dto);
+  }
+
+  @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancel a pending refund before it is submitted',
+    description:
+      'Cancels a refund while it is pending approval or not yet submitted on-chain, restores the payment refundable amount, and records an audit log entry.',
+  })
+  @ApiParam({ name: 'id', description: 'Refund UUID' })
+  @ApiOkResponse({ description: 'Refund cancelled.' })
+  @ApiNotFoundResponse({ description: 'Refund not found.' })
+  @ApiConflictResponse({ description: 'Refund has already been submitted or is in a terminal state.' })
+  async cancel(@Param('id') id: string, @Request() req: any) {
+    return this.paymentsService.cancelRefund(id, req.user.id);
   }
 }

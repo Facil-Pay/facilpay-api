@@ -23,7 +23,7 @@ import { Invoice, InvoiceStatus } from '../invoices/invoice.entity';
 import { Coupon } from '../coupons/coupon.entity';
 import { PaymentLink } from '../payment-links/payment-link.entity';
 import { assertCouponUsable, calculateCouponDiscount } from '../coupons/coupons.service';
-import { Refund, RefundReasonCode } from './refund.entity';
+import { Refund, RefundReasonCode, RefundStatus } from './refund.entity';
 import { GetRefundsDto } from './dto/get-refunds.dto';
 import { Dispute, DisputeStatus } from './dispute.entity';
 import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
@@ -53,6 +53,8 @@ import { PaymentLinksService } from '../payment-links/payment-links.service';
 import { StellarService } from '../stellar/stellar.service';
 import { UsersService } from '../users/users.service';
 import { SettlementAdjustment } from '../settlements/entities/settlement-adjustment.entity';
+import { LedgerAccount, LedgerReferenceType } from '../ledger/ledger-entry.entity';
+import { appendLedgerTransaction } from '../ledger/ledger-transaction';
 import { EventsService } from '../events/events.service';
 import { Customer } from '../customers/customer.entity';
 import { resolveCustomerForMerchant } from '../customers/customer-ownership';
@@ -2484,6 +2486,91 @@ export class PaymentsService {
     }
 
     return saved;
+  }
+
+  async cancelRefund(
+    refundId: string,
+    actorId: string,
+  ): Promise<{ payment: Payment; refund: Refund }> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      const refund = await queryRunner.manager.findOneBy(Refund, { id: refundId });
+      if (!refund) {
+        throw new NotFoundException(`Refund with ID ${refundId} not found`);
+      }
+
+      const preSubmissionStatuses: RefundStatus[] = [
+        RefundStatus.PENDING_APPROVAL,
+        RefundStatus.PENDING,
+      ];
+      if (
+        !preSubmissionStatuses.includes(refund.status) ||
+        Boolean(refund.stellarTransactionHash)
+      ) {
+        throw new ConflictException(
+          `Refund cannot be cancelled from status ${refund.status}`,
+        );
+      }
+
+      const payment = await queryRunner.manager.findOneBy(Payment, {
+        id: refund.paymentId,
+      });
+      if (!payment) {
+        throw new NotFoundException(`Payment ${refund.paymentId} not found`);
+      }
+
+      const refundAmount = Number(refund.amount);
+      const currentRefunded = Number(payment.refundedAmount || 0);
+      if (currentRefunded > 0) {
+        payment.refundedAmount = Math.max(0, currentRefunded - refundAmount);
+        if (
+          payment.status === PaymentStatus.REFUNDED ||
+          payment.status === PaymentStatus.PARTIALLY_REFUNDED
+        ) {
+          payment.status =
+            payment.refundedAmount > 0
+              ? PaymentStatus.PARTIALLY_REFUNDED
+              : PaymentStatus.COMPLETED;
+        }
+      }
+      const updatedPayment = await queryRunner.manager.save(payment);
+
+      refund.status = RefundStatus.CANCELLED;
+      refund.cancelledBy = actorId;
+      refund.cancelledAt = new Date();
+      const savedRefund = await queryRunner.manager.save(refund);
+
+      await queryRunner.commitTransaction();
+
+      this.logger.info(`Refund ${refundId} cancelled by ${actorId}`);
+
+      await this.auditLogsService
+        .record({
+          actorId,
+          actorType: 'user',
+          action: 'refund.cancelled',
+          resourceType: 'refund',
+          resourceId: refundId,
+          metadata: {
+            paymentId: payment.id,
+            amount: refundAmount,
+            currency: payment.currency,
+          },
+        })
+        .catch((err) =>
+          this.logger.error({ err }, 'Failed to record refund cancellation audit log'),
+        );
+
+      return { payment: updatedPayment, refund: savedRefund };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   @Cron(CronExpression.EVERY_HOUR)
