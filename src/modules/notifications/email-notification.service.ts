@@ -334,6 +334,25 @@ export class EmailNotificationService {
     });
   }
 
+  async sendPaymentReceipt(
+    to: string,
+    paymentId: string,
+    amount: string,
+    currency: string,
+    description: string | null,
+    locale?: string | null,
+  ): Promise<void> {
+    await this.sendPayerPaymentConfirmed(
+      to,
+      null,
+      paymentId,
+      amount,
+      currency,
+      description,
+      locale,
+    );
+  }
+
   async sendPayerRefundProcessed(
     to: string,
     payerName: string | null,

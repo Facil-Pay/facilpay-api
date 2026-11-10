@@ -61,6 +61,7 @@ import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { PaymentTimelineEvent } from './dto/payment-timeline.dto';
+import { ResendReceiptDto } from './dto/resend-receipt.dto';
 import { Payment } from './payment.entity';
 import { CreatePaymentNoteDto } from './dto/create-payment-note.dto';
 import { Refund } from './refund.entity';
@@ -531,7 +532,7 @@ export class PaymentsController {
   async createNote(
     @Param('id') id: string,
     @Body() dto: CreatePaymentNoteDto,
-    @Request() req: any,
+    @Req() req: any,
   ) {
     return this.paymentsService.addPaymentNote(id, req.user.id, dto.body);
   }
@@ -543,7 +544,7 @@ export class PaymentsController {
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiOkResponse({ description: 'Internal notes for the merchant payment.' })
   @ApiNotFoundResponse({ description: 'Payment not found.' })
-  async getNotes(@Param('id') id: string, @Request() req: any) {
+  async getNotes(@Param('id') id: string, @Req() req: any) {
     return this.paymentsService.getPaymentNotes(id, req.user.id);
   }
 
@@ -835,6 +836,43 @@ export class PaymentsController {
     return this.paymentsService.cancel(id);
   }
 
+  @Post(':id/receipt')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('bearer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Resend payment receipt email',
+    description:
+      'Queues the receipt email for a COMPLETED payment. Optionally accepts an `email` override. Rate-limited per payment to avoid email abuse.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Payment UUID',
+    example: '123e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiBody({ type: ResendReceiptDto, required: false })
+  @ApiOkResponse({
+    description: 'Receipt email queued.',
+    schema: {
+      example: {
+        paymentId: '123e4567-e89b-12d3-a456-426614174000',
+        email: 'customer@example.com',
+        queued: true,
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid email or missing recipient email.' })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  @ApiResponse({ status: 409, description: 'Payment is not in COMPLETED status.' })
+  @ApiResponse({ status: 429, description: 'Too many receipt resend requests for this payment.' })
+  resendReceipt(
+    @Param('id') id: string,
+    @Body() dto: ResendReceiptDto = {},
+    @Req() req: Request & { user?: { id: string } },
+  ) {
+    return this.paymentsService.resendReceipt(id, dto, req?.user?.id);
+  }
+
   @Get(':id/timeline')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
@@ -869,7 +907,7 @@ export class PaymentsController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
   async getTimeline(
     @Param('id') id: string,
-    @Request() req: any,
+    @Req() req: any,
   ): Promise<PaymentTimelineEvent[]> {
     return this.paymentsService.getTimeline(id, req.user.id);
   }

@@ -5,6 +5,8 @@ import {
   BadRequestException,
   UnprocessableEntityException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
@@ -38,6 +40,7 @@ import { RefundPaymentDto } from './dto/refund-payment.dto';
 import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { PaymentTimelineEvent } from './dto/payment-timeline.dto';
+import { ResendReceiptDto } from './dto/resend-receipt.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import {
   CursorPaginatedResult,
@@ -59,10 +62,13 @@ import { resolveCustomerForMerchant } from '../customers/customer-ownership';
 
 const DEFAULT_PAYMENT_EXPIRY_SECONDS = 1800;
 const DEFAULT_MAX_REFUNDS_PER_PAYMENT = 20;
+const DEFAULT_RECEIPT_RATE_LIMIT_MAX = 3;
+const DEFAULT_RECEIPT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class PaymentsService {
   private readonly logger: Logger;
+  private readonly receiptRateLimitMap = new Map<string, number[]>();
 
   constructor(
     @InjectRepository(Payment)
@@ -2499,5 +2505,92 @@ export class PaymentsService {
     if (result.affected && result.affected > 0) {
       this.logger.info(`Expired ${result.affected} pending refund approval(s)`);
     }
+  }
+
+  async resendReceipt(
+    id: string,
+    dto: ResendReceiptDto = {},
+    merchantId?: string,
+  ): Promise<{ paymentId: string; email: string; queued: boolean }> {
+    const payment = await this.paymentRepository.findOneBy({ id });
+    if (!payment) {
+      throw new NotFoundException(`Payment with ID ${id} not found`);
+    }
+
+    if (merchantId && payment.merchantId && payment.merchantId !== merchantId) {
+      throw new ForbiddenException('You do not have access to this payment');
+    }
+
+    if (payment.status !== PaymentStatus.COMPLETED) {
+      throw new ConflictException(
+        `Receipt can only be sent for completed payments. Current status: ${payment.status}`,
+      );
+    }
+
+    const recipientEmail = dto?.email?.trim() || payment.payerEmail;
+    if (!recipientEmail) {
+      throw new BadRequestException(
+        'No recipient email address on payment; please provide an email override',
+      );
+    }
+
+    const maxResends = Number(
+      this.configService.get<string>(
+        'PAYMENT_RECEIPT_RATE_LIMIT_MAX',
+        String(DEFAULT_RECEIPT_RATE_LIMIT_MAX),
+      ),
+    );
+    const windowMs = Number(
+      this.configService.get<string>(
+        'PAYMENT_RECEIPT_RATE_LIMIT_WINDOW_MS',
+        String(DEFAULT_RECEIPT_RATE_LIMIT_WINDOW_MS),
+      ),
+    );
+
+    const now = Date.now();
+    const recentTimestamps = (this.receiptRateLimitMap.get(payment.id) ?? []).filter(
+      (timestamp) => now - timestamp < windowMs,
+    );
+
+    if (maxResends > 0 && recentTimestamps.length >= maxResends) {
+      throw new HttpException(
+        'Too many receipt resend requests for this payment. Please try again later.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    recentTimestamps.push(now);
+    this.receiptRateLimitMap.set(payment.id, recentTimestamps);
+
+    if (typeof this.emailNotificationService.sendPaymentReceipt === 'function') {
+      await this.emailNotificationService.sendPaymentReceipt(
+        recipientEmail,
+        payment.id,
+        String(payment.amount),
+        payment.currency,
+        payment.description,
+        payment.payerLocale,
+      );
+    } else {
+      await this.emailNotificationService.sendPayerPaymentConfirmed(
+        recipientEmail,
+        null,
+        payment.id,
+        String(payment.amount),
+        payment.currency,
+        payment.description,
+        payment.payerLocale,
+      );
+    }
+
+    this.logger.info(
+      `Receipt email queued for payment ${payment.id} to ${recipientEmail}`,
+    );
+
+    return {
+      paymentId: payment.id,
+      email: recipientEmail,
+      queued: true,
+    };
   }
 }
