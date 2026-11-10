@@ -206,6 +206,10 @@ export class CheckoutSessionsService {
   async expire(id: string, merchantId: string): Promise<CheckoutSession> {
     const session = await this.findById(id, merchantId);
 
+    if (session.status === CheckoutSessionStatus.EXPIRED) {
+      return session;
+    }
+
     if (session.status !== CheckoutSessionStatus.OPEN) {
       throw new BadRequestException('Only OPEN sessions can be expired');
     }
