@@ -33,9 +33,21 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('Role not found');
     }
 
-    const hasPermission = requiredPermissions.every((permission) =>
-      role.permissions.includes(permission),
-    );
+    const permissions = Array.isArray(role.permissions) ? role.permissions : [];
+    const hasWildcard =
+      permissions.includes('*') || permissions.includes('admin');
+
+    const hasPermission =
+      hasWildcard ||
+      requiredPermissions.every((permission) => {
+        if (permissions.includes(permission)) return true;
+        const [namespace] = permission.split(/[:.]/);
+        return (
+          Boolean(namespace) &&
+          (permissions.includes(`${namespace}:*`) ||
+            permissions.includes(`${namespace}.*`))
+        );
+      });
 
     if (!hasPermission) {
       throw new ForbiddenException('Insufficient permissions');
