@@ -49,6 +49,16 @@ export class UpdateNotificationPreferencesDto {
   @IsOptional()
   @ApiProperty({ example: true, required: false })
   reports?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'When enabled, per-event non-security emails are consolidated into a once-daily digest sent in the merchant timezone.',
+  })
+  digest?: boolean;
 }
 
 @ApiTags('users')
@@ -118,6 +128,8 @@ export class NotificationPreferencesController {
       updates[NotificationCategory.SETTLEMENTS] = dto.settlements;
     if (dto.reports !== undefined)
       updates[NotificationCategory.REPORTS] = dto.reports;
+    if (dto.digest !== undefined)
+      updates[NotificationCategory.DIGEST] = dto.digest;
     return this.prefsService.updateForUser(user.id, updates);
   }
 }

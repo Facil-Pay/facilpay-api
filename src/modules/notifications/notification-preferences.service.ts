@@ -52,13 +52,33 @@ export class NotificationPreferencesService {
     if (category === NotificationCategory.SECURITY) {
       return true;
     }
+    if (
+      category !== NotificationCategory.DIGEST &&
+      (await this.isDigestEnabled(userId))
+    ) {
+      return false;
+    }
     const pref = await this.repo.findOne({ where: { userId, category } });
     return pref ? pref.email : true;
   }
 
+  async isDigestEnabled(userId: string): Promise<boolean> {
+    const pref = await this.repo.findOne({
+      where: { userId, category: NotificationCategory.DIGEST },
+    });
+    return pref ? pref.email : false;
+  }
+
+  async listDigestSubscribers(): Promise<string[]> {
+    const rows = await this.repo.find({
+      where: { category: NotificationCategory.DIGEST, email: true },
+    });
+    return rows.map((row) => row.userId);
+  }
+
   private defaultMap(): PreferenceMap {
     return ALL_NOTIFICATION_CATEGORIES.reduce((acc, cat) => {
-      acc[cat] = true;
+      acc[cat] = cat !== NotificationCategory.DIGEST;
       return acc;
     }, {} as PreferenceMap);
   }

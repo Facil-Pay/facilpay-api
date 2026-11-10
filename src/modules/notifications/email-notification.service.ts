@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
+import { DataSource } from 'typeorm';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { EmailEventType } from './email-log.entity';
@@ -11,17 +13,96 @@ import { translate } from './i18n/messages';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationCategory } from './notification-preference.entity';
 import { InAppNotificationsService } from './in-app-notifications.service';
-import { InAppNotificationType } from './in-app-notification.entity';
+import { InAppNotification, InAppNotificationType } from './in-app-notification.entity';
+
+export interface DailyDigestFailureHighlight {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  createdAt: string;
+}
+
+export interface DailyDigestSummary {
+  userId: string;
+  localDate: string;
+  timezone: string;
+  totalCount: number;
+  countsByType: Record<string, number>;
+  failureCount: number;
+  failures: DailyDigestFailureHighlight[];
+}
+
+export function getLocalDateAndHour(
+  date: Date,
+  timezone = 'UTC',
+): { localDate: string; hour: number } {
+  const tz = timezone || 'UTC';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const rawHour = Number(get('hour'));
+  return {
+    localDate: `${get('year')}-${get('month')}-${get('day')}`,
+    hour: rawHour === 24 ? 0 : rawHour,
+  };
+}
+
+export function summarizeDigestNotifications(
+  userId: string,
+  localDate: string,
+  timezone: string,
+  items: Pick<InAppNotification, 'id' | 'type' | 'title' | 'body' | 'createdAt'>[],
+): DailyDigestSummary {
+  const countsByType: Record<string, number> = {};
+  const failures: DailyDigestFailureHighlight[] = [];
+  const failurePattern = /fail|reject|dispute|overdue|error|alert|warning/i;
+
+  for (const item of items) {
+    countsByType[item.type] = (countsByType[item.type] ?? 0) + 1;
+    if (
+      failurePattern.test(item.type) ||
+      failurePattern.test(item.title) ||
+      failurePattern.test(item.body)
+    ) {
+      failures.push({
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        body: item.body,
+        createdAt: new Date(item.createdAt).toISOString(),
+      });
+    }
+  }
+
+  return {
+    userId,
+    localDate,
+    timezone,
+    totalCount: items.length,
+    countsByType,
+    failureCount: failures.length,
+    failures,
+  };
+}
 
 @Injectable()
 export class EmailNotificationService {
   private readonly logger: Logger;
+  private readonly sentDigestKeys = new Set<string>();
 
   constructor(
     @InjectQueue('emails') private readonly emailQueue: Queue,
     private readonly prefsService: NotificationPreferencesService,
     private readonly inAppNotificationsService: InAppNotificationsService,
     appLogger: AppLogger,
+    private readonly dataSource?: DataSource,
   ) {
     this.logger = appLogger.child({ module: EmailNotificationService.name });
   }
@@ -724,5 +805,109 @@ export class EmailNotificationService {
       paymentId,
       refundId,
     });
+  }
+
+  async sendDailyDigestEmail(
+    to: string,
+    summary: DailyDigestSummary,
+  ): Promise<boolean> {
+    const dedupeKey = `${summary.userId}:${summary.localDate}`;
+    if (this.sentDigestKeys.has(dedupeKey)) {
+      return false;
+    }
+    this.sentDigestKeys.add(dedupeKey);
+
+    const subject =
+      summary.failureCount > 0
+        ? `Daily Notification Digest (${summary.localDate}): ${summary.totalCount} events (${summary.failureCount} attention required)`
+        : `Daily Notification Digest (${summary.localDate}): ${summary.totalCount} events`;
+
+    await this.enqueue({
+      to,
+      subject,
+      templateName: 'daily-digest',
+      templateData: {
+        localDate: summary.localDate,
+        timezone: summary.timezone,
+        totalCount: summary.totalCount,
+        countsByType: summary.countsByType,
+        failureCount: summary.failureCount,
+        failures: summary.failures,
+      },
+      eventType: EmailEventType.DAILY_DIGEST,
+      recipientRole: 'merchant',
+    });
+
+    return true;
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async runScheduledDailyDigests(
+    now: Date = new Date(),
+    targetLocalHour = 8,
+  ): Promise<number> {
+    if (!this.dataSource) {
+      return 0;
+    }
+
+    const userIds = await this.prefsService.listDigestSubscribers();
+    if (userIds.length === 0) {
+      return 0;
+    }
+
+    let sentCount = 0;
+    const since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    for (const userId of userIds) {
+      const [userRow] = await this.dataSource.query(
+        `SELECT u."id", u."email", COALESCE(ms."timezone", 'UTC') AS "timezone"
+           FROM "users" u
+           LEFT JOIN "merchant_settings" ms ON ms."merchantId" = u."id"
+          WHERE u."id" = $1`,
+        [userId],
+      );
+      if (!userRow?.email) {
+        continue;
+      }
+
+      const timezone = userRow.timezone || 'UTC';
+      const { localDate, hour } = getLocalDateAndHour(now, timezone);
+      if (hour !== targetLocalHour) {
+        continue;
+      }
+
+      const dedupeKey = `${userId}:${localDate}`;
+      if (this.sentDigestKeys.has(dedupeKey)) {
+        continue;
+      }
+
+      const items: Pick<
+        InAppNotification,
+        'id' | 'type' | 'title' | 'body' | 'createdAt'
+      >[] = await this.dataSource.query(
+        `SELECT "id", "type", "title", "body", "createdAt"
+           FROM "in_app_notifications"
+          WHERE "userId" = $1 AND "createdAt" >= $2
+          ORDER BY "createdAt" DESC`,
+        [userId, since],
+      );
+
+      if (items.length === 0) {
+        continue;
+      }
+
+      const summary = summarizeDigestNotifications(
+        userId,
+        localDate,
+        timezone,
+        items,
+      );
+      const sent = await this.sendDailyDigestEmail(userRow.email, summary);
+      if (sent) {
+        sentCount += 1;
+      }
+    }
+
+    return sentCount;
   }
 }

@@ -20,6 +20,7 @@ export enum EmailEventType {
   DISPUTE_DEADLINE_REMINDER = 'dispute_deadline_reminder',
   DISPUTE_ESCALATED = 'dispute_escalated',
   DISPUTE_RESPONSE_REMINDER = 'dispute_response_reminder',
+  DAILY_DIGEST = 'daily_digest',
 }
 
 export enum EmailLogStatus {
