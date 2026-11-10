@@ -40,6 +40,11 @@ import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { PaymentTimelineEvent } from './dto/payment-timeline.dto';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import {
+  PAYMENT_EXPAND_WHITELIST,
+  PaymentExpandField,
+  parseExpandQuery,
+} from '../../common/dto/expand.dto';
+import {
   CursorPaginatedResult,
   PaginatedResult,
 } from '../../common/interfaces/paginated-result.interface';
@@ -654,10 +659,22 @@ export class PaymentsService {
     getPaymentsDto: GetPaymentsDto,
     scope?: { customerId: string; merchantId: string },
   ): Promise<CursorPaginatedResult<Payment> | PaginatedResult<Payment>> {
-    if (getPaymentsDto.cursor) {
-      return this.findWithCursor(getPaymentsDto, scope);
+    const expandKeys = parseExpandQuery(
+      getPaymentsDto.expand,
+      PAYMENT_EXPAND_WHITELIST,
+    );
+    const result = getPaymentsDto.cursor
+      ? await this.findWithCursor(getPaymentsDto, scope)
+      : await this.findWithOffset(getPaymentsDto, scope);
+
+    if (expandKeys.size === 0) {
+      return result;
     }
-    return this.findWithOffset(getPaymentsDto, scope);
+
+    const expandedData = await Promise.all(
+      result.data.map((payment) => this.applyPaymentExpansions(payment, expandKeys)),
+    );
+    return { ...result, data: expandedData };
   }
 
   async findCustomerPayments(
@@ -957,12 +974,48 @@ export class PaymentsService {
     return { sortField, sortValue, paymentId };
   }
 
-  async findOne(id: string): Promise<Payment> {
+  async findOne(
+    id: string,
+    expand?: string | string[],
+  ): Promise<Payment & Record<string, unknown>> {
+    const expandKeys = parseExpandQuery(expand, PAYMENT_EXPAND_WHITELIST);
     const payment = await this.paymentRepository.findOneBy({ id });
     if (!payment) {
       throw new NotFoundException(`Payment with ID ${id} not found`);
     }
-    return payment;
+    if (expandKeys.size === 0) {
+      return payment as Payment & Record<string, unknown>;
+    }
+    return this.applyPaymentExpansions(payment, expandKeys);
+  }
+
+  private async applyPaymentExpansions(
+    payment: Payment,
+    expandKeys: Set<PaymentExpandField>,
+  ): Promise<Payment & Record<string, unknown>> {
+    const expanded: Record<string, unknown> = { ...payment };
+
+    if (expandKeys.has('refunds')) {
+      expanded.refunds = await this.getRefunds(payment.id);
+    }
+
+    if (expandKeys.has('customer')) {
+      expanded.customer = payment.customerId
+        ? await this.dataSource.manager.findOneBy(Customer, {
+            id: payment.customerId,
+          })
+        : null;
+    }
+
+    if (expandKeys.has('paymentLink')) {
+      expanded.paymentLink = payment.paymentLinkId
+        ? await this.dataSource.manager.findOneBy(PaymentLink, {
+            id: payment.paymentLinkId,
+          })
+        : null;
+    }
+
+    return expanded as Payment & Record<string, unknown>;
   }
 
   async update(

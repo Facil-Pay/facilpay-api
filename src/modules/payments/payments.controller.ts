@@ -65,6 +65,7 @@ import { Payment } from './payment.entity';
 import { CreatePaymentNoteDto } from './dto/create-payment-note.dto';
 import { Refund } from './refund.entity';
 import { SortOrder } from '../../common/dto/pagination.dto';
+import { ExpandDto } from '../../common/dto/expand.dto';
 import {
   WebhookThrottle,
   BulkThrottle,
@@ -455,6 +456,14 @@ export class PaymentsController {
       example: { statusCode: 500, message: 'Internal server error' },
     },
   })
+  @ApiQuery({
+    name: 'expand',
+    required: false,
+    type: String,
+    description:
+      'Comma-separated list of related objects to embed in each payment response (allowed: customer, refunds, paymentLink)',
+    example: 'customer,refunds,paymentLink',
+  })
   async findAll(@Query() getPaymentsDto: GetPaymentsDto) {
     if (getPaymentsDto.from && getPaymentsDto.to) {
       const fromTime = new Date(getPaymentsDto.from).getTime();
@@ -474,16 +483,28 @@ export class PaymentsController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Get a payment by ID',
-    description: 'Returns a single payment by its UUID.',
+    description:
+      'Returns a single payment by its UUID. Pass `?expand=customer,refunds,paymentLink` to embed related objects.',
   })
   @ApiParam({
     name: 'id',
     description: 'Payment UUID',
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
+  @ApiQuery({
+    name: 'expand',
+    required: false,
+    type: String,
+    description:
+      'Comma-separated list of related objects to embed in the response (allowed: customer, refunds, paymentLink)',
+    example: 'customer,refunds,paymentLink',
+  })
   @ApiOkResponse({
     description: 'Payment found.',
     type: Payment,
+  })
+  @ApiBadRequestResponse({
+    description: 'Unknown expand key provided.',
   })
   @ApiNotFoundResponse({
     description: 'Payment not found.',
@@ -511,10 +532,8 @@ export class PaymentsController {
       example: { statusCode: 500, message: 'Internal server error' },
     },
   })
-  async findOne(@Param('id') id: string) {
-    const payment = await this.paymentsService.findOne(id);
-    const refunds = await this.paymentsService.getRefunds(id);
-    return { ...payment, refunds };
+  async findOne(@Param('id') id: string, @Query() query?: ExpandDto) {
+    return this.paymentsService.findOne(id, query?.expand);
   }
 
   @Post(':id/notes')
@@ -531,7 +550,7 @@ export class PaymentsController {
   async createNote(
     @Param('id') id: string,
     @Body() dto: CreatePaymentNoteDto,
-    @Request() req: any,
+    @Req() req: any,
   ) {
     return this.paymentsService.addPaymentNote(id, req.user.id, dto.body);
   }
@@ -543,7 +562,7 @@ export class PaymentsController {
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiOkResponse({ description: 'Internal notes for the merchant payment.' })
   @ApiNotFoundResponse({ description: 'Payment not found.' })
-  async getNotes(@Param('id') id: string, @Request() req: any) {
+  async getNotes(@Param('id') id: string, @Req() req: any) {
     return this.paymentsService.getPaymentNotes(id, req.user.id);
   }
 
@@ -869,7 +888,7 @@ export class PaymentsController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
   async getTimeline(
     @Param('id') id: string,
-    @Request() req: any,
+    @Req() req: any,
   ): Promise<PaymentTimelineEvent[]> {
     return this.paymentsService.getTimeline(id, req.user.id);
   }

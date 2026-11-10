@@ -127,4 +127,13 @@ export class GetPaymentsDto extends PaginationDto {
   })
   @IsOptional()
   tags?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Comma-separated list of related objects to embed in the response (allowed: customer, refunds, paymentLink)',
+    example: 'customer,refunds,paymentLink',
+  })
+  @IsOptional()
+  @IsString()
+  expand?: string;
 }
