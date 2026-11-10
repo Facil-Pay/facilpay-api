@@ -12,6 +12,7 @@ export enum OnboardingStatus {
   UNDER_REVIEW = 'under_review',
   APPROVED = 'approved',
   REJECTED = 'rejected',
+  CLOSED = 'closed',
 }
 
 @Entity('merchant_onboardings')
@@ -76,6 +77,9 @@ export class MerchantOnboarding {
   /** Flag for fields that require re-review when changed */
   @Column({ default: false })
   requiresReReview: boolean = false;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  closedAt: Date | null = null;
 
   @CreateDateColumn()
   createdAt: Date;

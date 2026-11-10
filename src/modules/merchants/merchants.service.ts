@@ -1,8 +1,13 @@
 import { MerchantSettings } from './entities/merchant-settings.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  ConflictException,
+  Optional,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
 import { MerchantIpAllowlist } from './entities/merchant-ip-allowlist.entity';
 import { MerchantOnboarding, OnboardingStatus } from '../onboarding/merchant-onboarding.entity';
@@ -15,6 +20,24 @@ import { IpAllowlistBlockedException } from './ip-allowlist-blocked.exception';
 import { isIpAllowed } from './ip-utils';
 import { AuditLogsService, RecordAuditLogParams } from '../audit-logs/audit-logs.service';
 import { ActorType } from '../audit-logs/audit-log.entity';
+import { Dispute, DisputeStatus } from '../payments/dispute.entity';
+import { Payout, PayoutStatus } from '../payouts/entities/payout.entity';
+import { Payment } from '../payments/payment.entity';
+import { ApiKey } from '../api-keys/api-key.entity';
+import { WebhookEndpoint } from '../webhooks/entities/webhook-endpoint.entity';
+import { PaymentLink } from '../payment-links/payment-link.entity';
+
+export interface AccountClosureResult {
+  merchantId: string;
+  status: OnboardingStatus;
+  closedAt: Date;
+  deactivated: {
+    apiKeys: number;
+    webhooks: number;
+    paymentLinks: number;
+  };
+  financialRecordsRetained: boolean;
+}
 
 @Injectable()
 export class MerchantsService {
@@ -33,6 +56,24 @@ export class MerchantsService {
     private readonly auditLogsService: AuditLogsService,
     @InjectRepository(MerchantSettings)
     private readonly settingsRepo: Repository<MerchantSettings>,
+    @Optional()
+    @InjectRepository(Dispute)
+    private readonly disputeRepo?: Repository<Dispute>,
+    @Optional()
+    @InjectRepository(Payout)
+    private readonly payoutRepo?: Repository<Payout>,
+    @Optional()
+    @InjectRepository(Payment)
+    private readonly paymentRepo?: Repository<Payment>,
+    @Optional()
+    @InjectRepository(ApiKey)
+    private readonly apiKeyRepo?: Repository<ApiKey>,
+    @Optional()
+    @InjectRepository(WebhookEndpoint)
+    private readonly webhookRepo?: Repository<WebhookEndpoint>,
+    @Optional()
+    @InjectRepository(PaymentLink)
+    private readonly paymentLinkRepo?: Repository<PaymentLink>,
   ) {}
 
   async getSettings(merchantId: string): Promise<MerchantSettings | null> {
@@ -283,6 +324,178 @@ export class MerchantsService {
       defaultCurrency: saved.defaultCurrency,
       status: saved.status,
       requiresReReview: saved.requiresReReview,
+    };
+  }
+
+  /**
+   * Closes a merchant account after verifying that no open disputes,
+   * pending payouts, or unsettled balances remain.
+   * Deactivates API keys, webhooks, and payment links while retaining financial records.
+   */
+  async closeAccount(
+    merchantId: string,
+    actorId: string = merchantId,
+  ): Promise<AccountClosureResult> {
+    let onboarding = await this.onboardingRepo.findOneBy({ merchantId });
+    if (onboarding?.status === OnboardingStatus.CLOSED) {
+      throw new ConflictException('Merchant account is already closed');
+    }
+
+    // 1. Check open disputes
+    let openDisputesCount = 0;
+    if (this.disputeRepo) {
+      openDisputesCount = await this.disputeRepo.count({
+        where: {
+          payment: { merchantId },
+          status: In([
+            DisputeStatus.OPEN,
+            DisputeStatus.UNDER_REVIEW,
+            DisputeStatus.ESCALATED,
+          ]),
+        },
+        relations: ['payment'],
+      });
+    }
+
+    // 2. Check pending or submitted payouts
+    let pendingPayoutsCount = 0;
+    if (this.payoutRepo) {
+      pendingPayoutsCount = await this.payoutRepo.count({
+        where: {
+          merchantId,
+          status: In([PayoutStatus.PENDING, PayoutStatus.SUBMITTED]),
+        },
+      });
+    }
+
+    // 3. Check unsettled balance (completed payments minus completed payouts)
+    let unsettledBalance = 0;
+    if (this.paymentRepo) {
+      const completedPayments = await this.paymentRepo.find({
+        where: { merchantId, status: 'completed' as any },
+      });
+      const totalReceived = completedPayments.reduce(
+        (sum, p) =>
+          sum +
+          Number(p.amount ?? 0) -
+          Number((p as any).refundedAmount ?? 0),
+        0,
+      );
+
+      let totalPaidOut = 0;
+      if (this.payoutRepo) {
+        const completedPayouts = await this.payoutRepo.find({
+          where: { merchantId, status: PayoutStatus.COMPLETED },
+        });
+        totalPaidOut = completedPayouts.reduce(
+          (sum, po) => sum + Number(po.amount ?? 0),
+          0,
+        );
+      }
+      unsettledBalance = Math.max(
+        0,
+        Number((totalReceived - totalPaidOut).toFixed(7)),
+      );
+    }
+
+    const obligations: string[] = [];
+    if (openDisputesCount > 0) {
+      obligations.push(
+        `${openDisputesCount} open dispute(s) must be resolved before closing the account`,
+      );
+    }
+    if (pendingPayoutsCount > 0) {
+      obligations.push(
+        `${pendingPayoutsCount} pending payout(s) must settle before closing the account`,
+      );
+    }
+    if (unsettledBalance > 0) {
+      obligations.push(
+        `Unsettled balance of ${unsettledBalance.toFixed(2)} must be withdrawn before closing the account`,
+      );
+    }
+
+    if (obligations.length > 0) {
+      throw new ConflictException({
+        message:
+          'Merchant account cannot be closed while outstanding obligations remain',
+        obligations,
+        details: {
+          openDisputes: openDisputesCount,
+          pendingPayouts: pendingPayoutsCount,
+          unsettledBalance,
+        },
+      });
+    }
+
+    // Deactivate API keys, webhooks, and payment links
+    let deactivatedApiKeys = 0;
+    if (this.apiKeyRepo) {
+      const res = await this.apiKeyRepo.update(
+        { userId: merchantId, isActive: true },
+        { isActive: false },
+      );
+      deactivatedApiKeys = res.affected ?? 0;
+    }
+
+    let deactivatedWebhooks = 0;
+    if (this.webhookRepo) {
+      const res = await this.webhookRepo.update(
+        { merchantId, isActive: true },
+        { isActive: false, disabledReason: 'account_closed' },
+      );
+      deactivatedWebhooks = res.affected ?? 0;
+    }
+
+    let deactivatedPaymentLinks = 0;
+    if (this.paymentLinkRepo) {
+      const res = await this.paymentLinkRepo.update(
+        { merchantId, isActive: true },
+        { isActive: false },
+      );
+      deactivatedPaymentLinks = res.affected ?? 0;
+    }
+
+    const closedAt = new Date();
+    if (!onboarding) {
+      onboarding = this.onboardingRepo.create({
+        merchantId,
+        status: OnboardingStatus.CLOSED,
+        closedAt,
+      });
+    } else {
+      onboarding.status = OnboardingStatus.CLOSED;
+      onboarding.closedAt = closedAt;
+    }
+    await this.onboardingRepo.save(onboarding);
+
+    await this.auditLogsService.record({
+      actorId,
+      actorType: 'user',
+      action: 'merchant_account_closed',
+      resourceType: 'merchant_account',
+      resourceId: merchantId,
+      metadata: {
+        closedAt: closedAt.toISOString(),
+        deactivated: {
+          apiKeys: deactivatedApiKeys,
+          webhooks: deactivatedWebhooks,
+          paymentLinks: deactivatedPaymentLinks,
+        },
+        financialRecordsRetained: true,
+      },
+    });
+
+    return {
+      merchantId,
+      status: OnboardingStatus.CLOSED,
+      closedAt,
+      deactivated: {
+        apiKeys: deactivatedApiKeys,
+        webhooks: deactivatedWebhooks,
+        paymentLinks: deactivatedPaymentLinks,
+      },
+      financialRecordsRetained: true,
     };
   }
 }

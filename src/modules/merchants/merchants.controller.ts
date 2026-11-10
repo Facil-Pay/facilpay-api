@@ -332,4 +332,18 @@ export class MerchantsController {
   ): Promise<MerchantSettings> {
     return this.merchantsService.upsertSettings(user.id, dto);
   }
+
+  @Post('me/close')
+  @ApiOperation({
+    summary: 'Close merchant account',
+    description:
+      'Closes the authenticated merchant account after verifying that no open disputes, pending payouts, or unsettled balance remain. Deactivates API keys, webhooks, and payment links while retaining financial records.',
+  })
+  @ApiOkResponse({
+    description: 'Merchant account closed.',
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  closeAccount(@CurrentUser() user: User) {
+    return this.merchantsService.closeAccount(user.id, user.id);
+  }
 }
