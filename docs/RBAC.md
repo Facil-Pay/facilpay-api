@@ -7,6 +7,8 @@ FacilPay currently has two related access-control mechanisms:
 
 A user can therefore have a built-in role, a database role, both, or neither. The mechanisms are independent: assigning a database role does not change `users.roles`, and changing `users.roles` does not change `users.roleId`.
 
+For merchant-scoped team membership and invitation roles (`ADMIN`, `DEVELOPER`, `SUPPORT`, `VIEWER` under `/v1/team`), see [docs/TEAM.md](TEAM.md).
+
 ## Built-in roles
 
 `src/common/constants/roles.ts` defines:

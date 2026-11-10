@@ -218,6 +218,7 @@ Environment variables:
 - [Webhooks](docs/WEBHOOKS.md) — webhook endpoints and event types
 - [Events](docs/EVENTS.md) — Events API, event object schema, filters, and pagination
 - [RBAC](docs/RBAC.md) — role-based access control
+- [Team Management](docs/TEAM.md) — team invitations and member roles
 - [Audit Log](docs/AUDIT_LOG.md) — audit logging
 - [Settlements](docs/SETTLEMENTS.md) — settlement processing
 - [Payment Splits](docs/PAYMENT_SPLITS.md) — payment splitting
