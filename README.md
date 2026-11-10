@@ -220,6 +220,7 @@ Environment variables:
 - [RBAC](docs/RBAC.md) — role-based access control
 - [Audit Log](docs/AUDIT_LOG.md) — audit logging
 - [Settlements](docs/SETTLEMENTS.md) — settlement processing
+- [Payouts](docs/PAYOUTS.md) — outbound payouts, balance calculation, and daily limits
 - [Payment Splits](docs/PAYMENT_SPLITS.md) — payment splitting
 - [Payment Links](docs/PAYMENT_LINKS.md) — payment link generation
 - [Merchant Rate Limiting](docs/MERCHANT_RATE_LIMITING.md) — rate limiting
