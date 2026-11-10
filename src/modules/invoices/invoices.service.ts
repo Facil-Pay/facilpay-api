@@ -90,8 +90,9 @@ export class InvoicesService {
       where: { id },
       relations: { lineItems: true },
     });
-    if (!invoice) throw new NotFoundException('Invoice not found');
-    if (invoice.merchantId !== merchantId) throw new ForbiddenException();
+    if (!invoice || invoice.merchantId !== merchantId) {
+      throw new NotFoundException('Invoice not found');
+    }
     return this.updateOverdueStatus(invoice);
   }
 
