@@ -4,7 +4,14 @@ import {
   AnalyticsGroupBy,
   AnalyticsInterval,
 } from './dto/get-payment-analytics.dto';
-import { AnalyticsService } from './analytics.service';
+import {
+  AnalyticsService,
+  normalizeToMonthlyMrr,
+} from './analytics.service';
+import {
+  RecurringPaymentInterval,
+  RecurringPaymentStatus,
+} from '../payments/recurring-payment.entity';
 
 const bucketKey = '2026-01-01T00:00:00';
 
@@ -173,5 +180,106 @@ describe('AnalyticsService refund and dispute analytics', () => {
     }
     expect(query.mock.calls[2][0]).toContain('JOIN "payments" p ON p."id" = r."paymentId"');
     expect(query.mock.calls[3][0]).toContain('JOIN "payments" p ON p."id" = d."paymentId"');
+  });
+});
+
+describe('AnalyticsService subscription metrics', () => {
+  it('normalises daily, weekly, monthly, and yearly amounts to monthly MRR', () => {
+    expect(normalizeToMonthlyMrr(100, RecurringPaymentInterval.MONTHLY)).toBeCloseTo(100, 2);
+    expect(normalizeToMonthlyMrr(120, RecurringPaymentInterval.YEARLY)).toBeCloseTo(10, 2);
+    expect(normalizeToMonthlyMrr(12, RecurringPaymentInterval.WEEKLY)).toBeCloseTo(52, 2);
+    expect(normalizeToMonthlyMrr(12, RecurringPaymentInterval.DAILY)).toBeCloseTo(365, 2);
+  });
+
+  it('computes per-month MRR, new MRR, churned MRR, active plans, and churn rate across weekly, monthly, and yearly intervals', async () => {
+    const monthBuckets = [
+      {
+        key: '2026-01-01T00:00:00',
+        start: new Date('2026-01-01T00:00:00.000Z'),
+        nextStart: new Date('2026-02-01T00:00:00.000Z'),
+      },
+      {
+        key: '2026-02-01T00:00:00',
+        start: new Date('2026-02-01T00:00:00.000Z'),
+        nextStart: new Date('2026-03-01T00:00:00.000Z'),
+      },
+    ];
+    const recurringPlans = [
+      // Weekly plan: 12/week -> 52.00/month, created in Jan, stays active
+      {
+        id: 'sub-weekly',
+        amount: '12.00',
+        interval: RecurringPaymentInterval.WEEKLY,
+        status: RecurringPaymentStatus.ACTIVE,
+        createdAt: new Date('2026-01-05T00:00:00.000Z'),
+        cancelledAt: null,
+        updatedAt: new Date('2026-01-05T00:00:00.000Z'),
+      },
+      // Yearly plan: 240/year -> 20.00/month, created in Jan, cancelled in Feb
+      {
+        id: 'sub-yearly',
+        amount: '240.00',
+        interval: RecurringPaymentInterval.YEARLY,
+        status: RecurringPaymentStatus.CANCELLED,
+        createdAt: new Date('2026-01-10T00:00:00.000Z'),
+        cancelledAt: new Date('2026-02-15T00:00:00.000Z'),
+        updatedAt: new Date('2026-02-15T00:00:00.000Z'),
+      },
+      // Monthly plan: 30/month, created in Feb, stays active
+      {
+        id: 'sub-monthly',
+        amount: '30.00',
+        interval: RecurringPaymentInterval.MONTHLY,
+        status: RecurringPaymentStatus.ACTIVE,
+        createdAt: new Date('2026-02-03T00:00:00.000Z'),
+        cancelledAt: null,
+        updatedAt: new Date('2026-02-03T00:00:00.000Z'),
+      },
+    ];
+
+    const query = jest
+      .fn()
+      .mockResolvedValueOnce(monthBuckets)
+      .mockResolvedValueOnce(recurringPlans);
+    const dataSource = { query } as unknown as DataSource;
+    const settingsRepo = {
+      findOne: jest.fn().mockResolvedValue({ timezone: 'UTC' }),
+    } as unknown as Repository<MerchantSettings>;
+    const service = new AnalyticsService(dataSource, settingsRepo);
+
+    const result = await service.getSubscriptionAnalytics('merchant-id', {
+      from: '2026-01-01T00:00:00.000Z',
+      to: '2026-03-01T00:00:00.000Z',
+      currency: 'USD',
+    });
+
+    expect(result.buckets).toEqual([
+      {
+        start: '2026-01-01T00:00:00.000Z',
+        localStart: '2026-01-01T00:00:00',
+        mrr: '72.00',
+        newMrr: '72.00',
+        churnedMrr: '0.00',
+        activePlans: 2,
+        newPlans: 2,
+        churnedPlans: 0,
+        churnRate: 0,
+      },
+      {
+        start: '2026-02-01T00:00:00.000Z',
+        localStart: '2026-02-01T00:00:00',
+        mrr: '82.00',
+        newMrr: '30.00',
+        churnedMrr: '20.00',
+        activePlans: 2,
+        newPlans: 1,
+        churnedPlans: 1,
+        churnRate: 0.3333,
+      },
+    ]);
+    expect(result.mrr).toBe('82.00');
+    expect(result.activePlans).toBe(2);
+    expect(result.churnedMrr).toBe('20.00');
+    expect(result.churnRate).toBe(0.3333);
   });
 });

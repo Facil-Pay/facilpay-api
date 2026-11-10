@@ -13,6 +13,7 @@ import {
   AnalyticsService,
   PaymentAnalyticsResult,
   RefundsDisputesAnalyticsResult,
+  SubscriptionAnalyticsResult,
 } from './analytics.service';
 import { GetPaymentAnalyticsDto } from './dto/get-payment-analytics.dto';
 
@@ -51,5 +52,20 @@ export class AnalyticsController {
     @Query() query: GetPaymentAnalyticsDto,
   ): Promise<RefundsDisputesAnalyticsResult> {
     return this.analyticsService.getRefundsDisputesAnalytics(user.id, query);
+  }
+
+  @Get('subscriptions')
+  @ApiOperation({
+    summary: 'Monthly subscription KPIs (MRR, new/churned MRR, active plans, churn rate)',
+    description:
+      'Normalises recurring payment plans (daily, weekly, monthly, yearly) to monthly recurring revenue (MRR) and returns per-month buckets in the merchant timezone.',
+  })
+  @ApiOkResponse({ description: 'Bucketed subscription analytics.' })
+  @ApiBadRequestResponse({ description: 'Invalid range or too many buckets.' })
+  getSubscriptions(
+    @CurrentUser() user: User,
+    @Query() query: GetPaymentAnalyticsDto,
+  ): Promise<SubscriptionAnalyticsResult> {
+    return this.analyticsService.getSubscriptionAnalytics(user.id, query);
   }
 }

@@ -4,6 +4,10 @@ import { DataSource, Repository } from 'typeorm';
 import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
 import { PaymentStatus } from '../payments/payment.entity';
 import {
+  RecurringPaymentInterval,
+  RecurringPaymentStatus,
+} from '../payments/recurring-payment.entity';
+import {
   AnalyticsGroupBy,
   AnalyticsInterval,
   GetPaymentAnalyticsDto,
@@ -87,6 +91,52 @@ export interface RefundsDisputesAnalyticsResult {
   timezone: string;
   currency: string | null;
   buckets: RefundsDisputesBucket[];
+}
+
+export interface SubscriptionAnalyticsBucket {
+  start: string;
+  localStart: string;
+  mrr: string;
+  newMrr: string;
+  churnedMrr: string;
+  activePlans: number;
+  newPlans: number;
+  churnedPlans: number;
+  churnRate: number | null;
+}
+
+export interface SubscriptionAnalyticsResult {
+  from: string;
+  to: string;
+  timezone: string;
+  currency: string | null;
+  mrr: string;
+  newMrr: string;
+  churnedMrr: string;
+  activePlans: number;
+  churnRate: number | null;
+  buckets: SubscriptionAnalyticsBucket[];
+}
+
+export function normalizeToMonthlyMrr(
+  amount: number | string,
+  interval: RecurringPaymentInterval | string,
+): number {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+    return 0;
+  }
+  switch (String(interval).toLowerCase()) {
+    case RecurringPaymentInterval.DAILY:
+      return numericAmount * (365 / 12);
+    case RecurringPaymentInterval.WEEKLY:
+      return numericAmount * (52 / 12);
+    case RecurringPaymentInterval.YEARLY:
+      return numericAmount / 12;
+    case RecurringPaymentInterval.MONTHLY:
+    default:
+      return numericAmount;
+  }
 }
 
 interface Aggregate {
@@ -271,6 +321,163 @@ export class AnalyticsService {
           disputeRate: agg.paymentCount > 0 ? Number((agg.disputeCount / agg.paymentCount).toFixed(4)) : null,
         };
       }),
+    };
+  }
+
+  async getSubscriptionAnalytics(
+    merchantId: string,
+    dto: GetPaymentAnalyticsDto,
+  ): Promise<SubscriptionAnalyticsResult> {
+    const to = dto.to ? new Date(dto.to) : new Date();
+    const from = dto.from
+      ? new Date(dto.from)
+      : new Date(to.getTime() - 6 * 30 * 24 * 60 * 60 * 1000);
+    if (from >= to) {
+      throw new BadRequestException('`from` must be before `to`');
+    }
+    if ((to.getTime() - from.getTime()) / APPROX_BUCKET_MS[AnalyticsInterval.MONTH] > MAX_BUCKETS) {
+      throw new BadRequestException(
+        `Range too large for interval "month" (max ${MAX_BUCKETS} buckets)`,
+      );
+    }
+
+    const timezone = dto.timezone ?? (await this.getMerchantTimezone(merchantId));
+    const currency = dto.currency ?? null;
+    const keyFormat = `'YYYY-MM-DD"T"HH24:MI:SS'`;
+
+    const bucketRows: { key: string; start: Date; nextStart?: Date }[] =
+      await this.dataSource.query(
+        `SELECT to_char(gs, ${keyFormat}) AS key,
+                (gs AT TIME ZONE $1) AS start,
+                ((gs + interval '1 month') AT TIME ZONE $1) AS "nextStart"
+           FROM generate_series(
+                  date_trunc('month', $2::timestamptz AT TIME ZONE $1),
+                  date_trunc('month', ($3::timestamptz - interval '1 microsecond') AT TIME ZONE $1),
+                  interval '1 month'
+                ) AS gs
+          ORDER BY gs`,
+        [timezone, from, to],
+      );
+
+    const planParams: unknown[] = [merchantId];
+    let currencyClause = '';
+    if (currency) {
+      planParams.push(currency);
+      currencyClause = `AND rp."currency" = $2`;
+    }
+
+    const plans: Array<{
+      id: string;
+      amount: string | number;
+      interval: string;
+      status: string;
+      createdAt: string | Date;
+      cancelledAt: string | Date | null;
+      updatedAt: string | Date;
+    }> = await this.dataSource.query(
+      `SELECT rp."id",
+              rp."amount",
+              rp."interval",
+              rp."status",
+              rp."createdAt",
+              rp."cancelledAt",
+              rp."updatedAt"
+         FROM "recurring_payments" rp
+        WHERE (rp."merchantId" = $1 OR rp."createdBy" = $1)
+          ${currencyClause}`,
+      planParams,
+    );
+
+    const buckets: SubscriptionAnalyticsBucket[] = bucketRows.map((row, idx) => {
+      const bucketStart = new Date(row.start);
+      const bucketEnd = row.nextStart
+        ? new Date(row.nextStart)
+        : idx + 1 < bucketRows.length
+          ? new Date(bucketRows[idx + 1].start)
+          : new Date(bucketStart.getTime() + 31 * 24 * 60 * 60 * 1000);
+
+      let mrr = 0;
+      let newMrr = 0;
+      let churnedMrr = 0;
+      let activePlans = 0;
+      let newPlans = 0;
+      let churnedPlans = 0;
+      let startActivePlans = 0;
+
+      for (const plan of plans) {
+        const monthly = normalizeToMonthlyMrr(plan.amount, plan.interval);
+        const createdAt = new Date(plan.createdAt);
+        const effectiveCancelledAt = plan.cancelledAt
+          ? new Date(plan.cancelledAt)
+          : plan.status === RecurringPaymentStatus.CANCELLED
+            ? new Date(plan.updatedAt)
+            : null;
+        const isPaused = plan.status === RecurringPaymentStatus.PAUSED;
+
+        const wasActiveAtStart =
+          createdAt < bucketStart &&
+          !isPaused &&
+          (!effectiveCancelledAt || effectiveCancelledAt >= bucketStart);
+        if (wasActiveAtStart) {
+          startActivePlans += 1;
+        }
+
+        const createdInBucket = createdAt >= bucketStart && createdAt < bucketEnd;
+        if (createdInBucket) {
+          newPlans += 1;
+          newMrr += monthly;
+        }
+
+        const churnedInBucket =
+          effectiveCancelledAt !== null &&
+          effectiveCancelledAt >= bucketStart &&
+          effectiveCancelledAt < bucketEnd;
+        if (churnedInBucket) {
+          churnedPlans += 1;
+          churnedMrr += monthly;
+        }
+
+        const activeAtBucketEnd =
+          createdAt < bucketEnd &&
+          !isPaused &&
+          (!effectiveCancelledAt || effectiveCancelledAt >= bucketEnd);
+        if (activeAtBucketEnd) {
+          activePlans += 1;
+          mrr += monthly;
+        }
+      }
+
+      const denominator = startActivePlans + newPlans;
+      const churnRate =
+        denominator > 0
+          ? Number((churnedPlans / denominator).toFixed(4))
+          : null;
+
+      return {
+        start: bucketStart.toISOString(),
+        localStart: row.key,
+        mrr: money(mrr),
+        newMrr: money(newMrr),
+        churnedMrr: money(churnedMrr),
+        activePlans,
+        newPlans,
+        churnedPlans,
+        churnRate,
+      };
+    });
+
+    const latest = buckets[buckets.length - 1];
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      timezone,
+      currency,
+      mrr: latest ? latest.mrr : '0.00',
+      newMrr: latest ? latest.newMrr : '0.00',
+      churnedMrr: latest ? latest.churnedMrr : '0.00',
+      activePlans: latest ? latest.activePlans : 0,
+      churnRate: latest ? latest.churnRate : null,
+      buckets,
     };
   }
 

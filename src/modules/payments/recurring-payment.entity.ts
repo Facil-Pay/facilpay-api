@@ -10,6 +10,7 @@ export enum RecurringPaymentInterval {
   DAILY = 'daily',
   WEEKLY = 'weekly',
   MONTHLY = 'monthly',
+  YEARLY = 'yearly',
 }
 
 export enum RecurringPaymentStatus {
