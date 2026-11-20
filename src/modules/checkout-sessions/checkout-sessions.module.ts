@@ -10,6 +10,8 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { ProductsModule } from '../products/products.module';
 import { CouponsModule } from '../coupons/coupons.module';
+import { NotificationsModule } from '../notifications/notifications.module';
+import { CheckoutRecoveryService } from './checkout-recovery.service';
 
 @Module({
   imports: [
@@ -21,9 +23,10 @@ import { CouponsModule } from '../coupons/coupons.module';
     PaymentsModule,
     ProductsModule,
     CouponsModule,
+    NotificationsModule,
   ],
   controllers: [CheckoutSessionsController, CheckoutSessionsPublicController],
-  providers: [CheckoutSessionsService],
-  exports: [CheckoutSessionsService],
+  providers: [CheckoutSessionsService, CheckoutRecoveryService],
+  exports: [CheckoutSessionsService, CheckoutRecoveryService],
 })
 export class CheckoutSessionsModule {}

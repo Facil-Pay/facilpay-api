@@ -46,4 +46,25 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsObject()
   refundApprovalThresholds?: Record<string, number> | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Send a single recovery email to customers who abandon a checkout with a known email. Defaults to false.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  recoveryEmailsEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Minutes after checkout expiry before the recovery email is sent.',
+    default: 60,
+    minimum: 0,
+    maximum: 10080,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  recoveryEmailDelayMinutes?: number;
 }

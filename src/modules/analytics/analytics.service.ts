@@ -1,7 +1,12 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { Between, DataSource, IsNull, Not, Repository } from 'typeorm';
 import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
+import {
+  CheckoutSession,
+  CheckoutSessionStatus,
+} from '../checkout-sessions/entities/checkout-session.entity';
+import { GetCheckoutRecoveryAnalyticsDto } from './dto/get-checkout-recovery-analytics.dto';
 import { PaymentStatus } from '../payments/payment.entity';
 import {
   AnalyticsGroupBy,
@@ -89,6 +94,15 @@ export interface RefundsDisputesAnalyticsResult {
   buckets: RefundsDisputesBucket[];
 }
 
+export interface CheckoutRecoveryAnalyticsResult {
+  from: string;
+  to: string;
+  expiredSessionsWithEmail: number;
+  recoveryEmailsSent: number;
+  recoveredSessions: number;
+  recoveryRate: number | null;
+}
+
 interface Aggregate {
   gross: number;
   fees: number;
@@ -105,7 +119,57 @@ export class AnalyticsService {
     private readonly dataSource: DataSource,
     @InjectRepository(MerchantSettings)
     private readonly settingsRepo: Repository<MerchantSettings>,
+    @InjectRepository(CheckoutSession)
+    private readonly sessionRepo: Repository<CheckoutSession>,
   ) {}
+
+  async getCheckoutRecoveryAnalytics(
+    merchantId: string,
+    dto: GetCheckoutRecoveryAnalyticsDto,
+  ): Promise<CheckoutRecoveryAnalyticsResult> {
+    const to = dto.to ? new Date(dto.to) : new Date();
+    const from = dto.from ? new Date(dto.from) : new Date(to.getTime() - DEFAULT_RANGE_MS);
+    if (from >= to) {
+      throw new BadRequestException('`from` must be before `to`');
+    }
+
+    const [expiredSessionsWithEmail, recoveryEmailsSent, recoveredSessions] =
+      await Promise.all([
+        this.sessionRepo.count({
+          where: {
+            merchantId,
+            status: CheckoutSessionStatus.EXPIRED,
+            customerEmail: Not(IsNull()),
+            createdAt: Between(from, to),
+          },
+        }),
+        this.sessionRepo.count({
+          where: {
+            merchantId,
+            recoveryEmailSentAt: Not(IsNull()),
+            createdAt: Between(from, to),
+          },
+        }),
+        this.sessionRepo.count({
+          where: {
+            merchantId,
+            recoveredFromId: Not(IsNull()),
+            createdAt: Between(from, to),
+          },
+        }),
+      ]);
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      expiredSessionsWithEmail,
+      recoveryEmailsSent,
+      recoveredSessions,
+      recoveryRate: recoveryEmailsSent
+        ? Math.round((recoveredSessions / recoveryEmailsSent) * 10000) / 10000
+        : null,
+    };
+  }
 
   async getPaymentAnalytics(
     merchantId: string,

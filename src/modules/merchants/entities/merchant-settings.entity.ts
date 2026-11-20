@@ -30,6 +30,12 @@ export class MerchantSettings {
   @Column({ type: 'varchar', length: 64, default: 'UTC' })
   timezone: string = 'UTC';
 
+  @Column({ default: false })
+  recoveryEmailsEnabled: boolean = false;
+
+  @Column({ type: 'int', default: 60 })
+  recoveryEmailDelayMinutes: number = 60;
+
   /**
    * Per-currency refund approval thresholds.
    * Refunds above the configured amount require a second authorised user to approve.

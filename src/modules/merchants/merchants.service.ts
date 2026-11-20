@@ -46,6 +46,8 @@ export class MerchantsService {
     if (dto.reminderOffsets !== undefined) settings.reminderOffsets = dto.reminderOffsets;
     if (dto.timezone !== undefined) settings.timezone = dto.timezone;
     if (dto.refundApprovalThresholds !== undefined) settings.refundApprovalThresholds = dto.refundApprovalThresholds;
+    if (dto.recoveryEmailsEnabled !== undefined) settings.recoveryEmailsEnabled = dto.recoveryEmailsEnabled;
+    if (dto.recoveryEmailDelayMinutes !== undefined) settings.recoveryEmailDelayMinutes = dto.recoveryEmailDelayMinutes;
     return this.settingsRepo.save(settings);
   }
 

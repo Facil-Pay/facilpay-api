@@ -11,10 +11,12 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
 import {
   AnalyticsService,
+  CheckoutRecoveryAnalyticsResult,
   PaymentAnalyticsResult,
   RefundsDisputesAnalyticsResult,
 } from './analytics.service';
 import { GetPaymentAnalyticsDto } from './dto/get-payment-analytics.dto';
+import { GetCheckoutRecoveryAnalyticsDto } from './dto/get-checkout-recovery-analytics.dto';
 
 @ApiTags('analytics')
 @ApiBearerAuth('bearer')
@@ -51,5 +53,32 @@ export class AnalyticsController {
     @Query() query: GetPaymentAnalyticsDto,
   ): Promise<RefundsDisputesAnalyticsResult> {
     return this.analyticsService.getRefundsDisputesAnalytics(user.id, query);
+  }
+
+  @Get('checkout-recovery')
+  @ApiOperation({
+    summary: 'Abandoned checkout recovery metrics for the authenticated merchant',
+    description:
+      'Returns expired sessions with a known email, recovery emails sent, sessions created from recovery links and the resulting recovery rate for the requested range.',
+  })
+  @ApiOkResponse({
+    description: 'Checkout recovery metrics.',
+    schema: {
+      example: {
+        from: '2026-01-01T00:00:00.000Z',
+        to: '2026-01-31T00:00:00.000Z',
+        expiredSessionsWithEmail: 100,
+        recoveryEmailsSent: 80,
+        recoveredSessions: 20,
+        recoveryRate: 0.25,
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid range.' })
+  getCheckoutRecovery(
+    @CurrentUser() user: User,
+    @Query() query: GetCheckoutRecoveryAnalyticsDto,
+  ): Promise<CheckoutRecoveryAnalyticsResult> {
+    return this.analyticsService.getCheckoutRecoveryAnalytics(user.id, query);
   }
 }

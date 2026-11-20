@@ -33,6 +33,8 @@ Sessions have a status lifecycle: `OPEN` → `COMPLETE` or `EXPIRED`. Merchants 
   "expiresAt": "2026-10-17T12:00:00.000Z",
   "status": "OPEN",
   "paymentId": null,
+  "recoveryEmailSentAt": null,
+  "recoveredFromId": null,
   "createdAt": "2026-10-17T10:30:00.000Z",
   "updatedAt": "2026-10-17T10:30:00.000Z"
 }
@@ -53,6 +55,8 @@ Sessions have a status lifecycle: `OPEN` → `COMPLETE` or `EXPIRED`. Merchants 
 | `expiresAt` | Timestamp | Session expiry time |
 | `status` | Enum | Session status: `OPEN`, `COMPLETE`, `EXPIRED` |
 | `paymentId` | UUID | Associated payment ID (null until payment is created) |
+| `recoveryEmailSentAt` | Timestamp | When the abandoned-checkout recovery email was queued (null otherwise) |
+| `recoveredFromId` | UUID | Original session ID when this session was created from a recovery link |
 | `createdAt` | Timestamp | Creation timestamp |
 | `updatedAt` | Timestamp | Last update timestamp |
 
@@ -401,6 +405,35 @@ Sessions can be expired manually via `POST /v1/checkout/sessions/:id/expire`.
 
 ---
 
+## Abandoned Checkout Recovery
+
+Merchants can opt in to a single recovery email for expired sessions that have a `customerEmail`:
+
+```
+PATCH /v1/merchants/me/settings
+{
+  "recoveryEmailsEnabled": true,
+  "recoveryEmailDelayMinutes": 60
+}
+```
+
+`recoveryEmailsEnabled` defaults to `false`; `recoveryEmailDelayMinutes` defaults to `60` (0–10080). A cron job runs every 10 minutes and emails each eligible session at most once, after `expiresAt + recoveryEmailDelayMinutes`. Recovery emails are skipped when the customer is suppressed (unsubscribed, bounced or complained), when the merchant's `checkout_recovery` notification preference is disabled, or when another process already claimed the session. The email includes an unsubscribe link.
+
+The email points to `{CHECKOUT_BASE_URL}/recover/{publicId}` of the original session. The checkout UI calls the public endpoint below, which creates a new `OPEN` session with the same line items, currency and customer email, linked back to the original through `recoveredFromId`:
+
+```
+POST /v1/checkout/sessions/:publicId/recover
+```
+
+No authentication is required. The response is the new session object.
+
+**Response (400):** the session is still open or has no customer email.
+**Response (404):** no session exists with that public ID.
+
+Recovery performance is reported by `GET /v1/analytics/checkout-recovery`, which returns `expiredSessionsWithEmail`, `recoveryEmailsSent`, `recoveredSessions` and `recoveryRate` (`recoveredSessions / recoveryEmailsSent`, or `null` when no emails were sent).
+
+---
+
 ## Currency Handling
 
 The `currency` field accepts ISO 4217 codes (e.g., `USD`, `EUR`, `GBP`). The total is calculated automatically from line items:
@@ -485,6 +518,7 @@ curl -s -X GET "http://localhost:3000/v1/checkout/sessions/$SESSION_ID" \
 | 401 | `Missing or invalid JWT` | Authentication required |
 | 404 | `Session not found` | Session does not exist or belongs to another merchant |
 | 410 | `Session has expired` | Public checkout page for expired session |
+| 400 | `Only expired checkout sessions can be recovered` | Recovery link used on an open session |
 
 ---
 
@@ -506,6 +540,8 @@ cancelUrl       TEXT NOT NULL
 expiresAt       TIMESTAMP NOT NULL
 status          ENUM('OPEN', 'COMPLETE', 'EXPIRED') NOT NULL DEFAULT 'OPEN'
 paymentId       UUID REFERENCES payments(id) ON DELETE SET NULL
+recoveryEmailSentAt TIMESTAMP NULL
+recoveredFromId UUID NULL
 createdAt       TIMESTAMP NOT NULL
 updatedAt       TIMESTAMP NOT NULL
 
@@ -513,7 +549,7 @@ INDEX idx_checkout_sessions_merchant_id (merchantId)
 INDEX idx_checkout_sessions_public_id (publicId)
 ```
 
-Migration: `1751300000004-CreateCheckoutSessionsTable.ts`
+Migrations: `1751300000004-CreateCheckoutSessionsTable.ts`, `1792900000000-AddCheckoutRecoveryEmails.ts`
 
 ---
 

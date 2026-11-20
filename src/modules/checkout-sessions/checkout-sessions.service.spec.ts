@@ -136,14 +136,24 @@ describe('CheckoutSessionsService', () => {
 
       await expect(
         service.completeSession('pub-id-1234567890ab', 'buyer@example.com'),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(GoneException);
 
       expect(webhooksService.dispatchEventToMerchant).not.toHaveBeenCalled();
     });
 
     it('dispatches checkout.session.expired for each stale session in the cron job', async () => {
-      const stale1 = makeSession({ id: 's1', merchantId: 'merchant-a', publicId: 'pub1' });
-      const stale2 = makeSession({ id: 's2', merchantId: 'merchant-b', publicId: 'pub2' });
+      const stale1 = makeSession({
+        id: 's1',
+        merchantId: 'merchant-a',
+        publicId: 'pub1',
+        expiresAt: new Date(Date.now() - 60 * 1000),
+      });
+      const stale2 = makeSession({
+        id: 's2',
+        merchantId: 'merchant-b',
+        publicId: 'pub2',
+        expiresAt: new Date(Date.now() - 60 * 1000),
+      });
       const fresh = makeSession({
         id: 's3',
         merchantId: 'merchant-c',

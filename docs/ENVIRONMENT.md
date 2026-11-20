@@ -16,6 +16,7 @@ whether it is required in production.
 | `NODE_ENV` | Runtime environment | `development` | No | `production` |
 | `SERVICE_NAME` | Service name used in logs | `facilpay-api` | No | `facilpay-api` |
 | `APP_URL` | Public base URL used in generated links (e.g. recurring-payment manage/cancel URLs) | `http://localhost:3000` | Yes in prod | `https://api.facilpay.com` |
+| `CHECKOUT_BASE_URL` | Hosted checkout UI base URL; recovery emails link to `{CHECKOUT_BASE_URL}/recover/{publicId}` | `https://checkout.facilpay.com` | Yes in prod | `https://checkout.facilpay.com` |
 
 ## Auth
 

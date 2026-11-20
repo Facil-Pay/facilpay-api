@@ -24,6 +24,7 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CheckoutSessionsService } from './checkout-sessions.service';
+import { CheckoutRecoveryService } from './checkout-recovery.service';
 import {
   ApplyCheckoutCouponDto,
   CreateCheckoutSessionDto,
@@ -132,7 +133,10 @@ export class CheckoutSessionsController {
 @ApiTags('checkout-sessions (public)')
 @Controller('v1/checkout/sessions')
 export class CheckoutSessionsPublicController {
-  constructor(private readonly service: CheckoutSessionsService) {}
+  constructor(
+    private readonly service: CheckoutSessionsService,
+    private readonly recoveryService: CheckoutRecoveryService,
+  ) {}
 
   @Get(':publicId/public')
   @ApiOperation({
@@ -179,6 +183,33 @@ export class CheckoutSessionsPublicController {
       successUrl: session.successUrl,
       cancelUrl: session.cancelUrl,
     };
+  }
+
+  @Post(':publicId/recover')
+  @ApiOperation({
+    summary: 'Create a fresh checkout session from an expired one',
+    description:
+      'Creates a new OPEN checkout session pre-filled with the line items, currency and customer email of an expired session. No authentication required. The recovery email links to this flow.',
+  })
+  @ApiOkResponse({
+    description: 'Recovery checkout session created',
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        publicId: 'freshPublicId1234567890',
+        recoveredFromId: 'original-session-id',
+        lineItems: [{ name: 'Product 1', quantity: 2, unitAmount: 1000 }],
+        currency: 'USD',
+        total: 2000,
+        status: 'OPEN',
+        expiresAt: '2026-01-26T12:00:00.000Z',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Session is not expired or has no customer email' })
+  @ApiNotFoundResponse({ description: 'Session not found' })
+  async recover(@Param('publicId') publicId: string): Promise<CheckoutSession> {
+    return this.recoveryService.createRecoverySession(publicId);
   }
 
   @Post(':publicId/coupon')

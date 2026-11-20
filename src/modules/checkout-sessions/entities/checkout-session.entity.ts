@@ -84,6 +84,12 @@ export class CheckoutSession {
   @Column({ nullable: true })
   paymentId: string | null;
 
+  @Column({ type: 'timestamp', nullable: true })
+  recoveryEmailSentAt: Date | null;
+
+  @Column({ type: 'uuid', nullable: true })
+  recoveredFromId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

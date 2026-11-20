@@ -16,6 +16,7 @@ export enum NotificationCategory {
   SETTLEMENTS = 'settlements',
   SECURITY = 'security',
   REPORTS = 'reports',
+  CHECKOUT_RECOVERY = 'checkout_recovery',
 }
 
 export const ALL_NOTIFICATION_CATEGORIES = Object.values(NotificationCategory);

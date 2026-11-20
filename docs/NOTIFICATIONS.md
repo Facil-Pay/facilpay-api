@@ -134,6 +134,7 @@ Merants control which transactional emails they receive through per-category opt
 | Settlements  | `settlements`| `true`  | Yes          | Settlement-related emails (reserved — no email currently checks this flag)  |
 | Security     | `security`   | `true`  | No           | Security alerts, webhook endpoint disabled, API key expiry warnings         |
 | Reports      | `reports`    | `true`  | Yes          | Scheduled report summaries                                                   |
+| Checkout recovery | `checkout_recovery` | `true` | Yes    | Abandoned checkout recovery emails (payer)                                   |
 
 > **Security is always enabled.** Any value submitted for the `security` category in a PATCH request is silently ignored.
 
@@ -154,7 +155,8 @@ Returns the current preference map. Categories without an explicit database row 
   "disputes": true,
   "settlements": true,
   "security": true,
-  "reports": false
+  "reports": false,
+  "checkout_recovery": true
 }
 ```
 
@@ -185,6 +187,7 @@ Toggle one or more categories. Omitted fields are left unchanged. The `security`
 | `disputes`   | `boolean` | No       | Toggle dispute emails                |
 | `settlements`| `boolean` | No       | Toggle settlement emails            |
 | `reports`    | `boolean` | No       | Toggle report summary emails        |
+| `checkout_recovery` | `boolean` | No | Toggle abandoned checkout recovery emails |
 
 **Response — `200 OK`**
 
@@ -194,7 +197,7 @@ Returns the full preference map after the update.
 
 ## Email Events and Preference Suppression
 
-The table below maps each merchant-facing email to the preference category that gates it. Emails sent to payers (customers) are not affected by merchant preferences.
+The table below maps each email to the preference category that gates it. With the exception of abandoned checkout recovery, emails sent to payers (customers) are not affected by merchant preferences.
 
 | Email                              | Recipient  | Gated by      | In-app notification created? |
 | --------------------------------- | ---------- | ------------- | ---------------------------- |
@@ -215,6 +218,7 @@ The table below maps each merchant-facing email to the preference category that 
 | Payment confirmed                  | Payer      | —             | No                           |
 | Refund processed                   | Payer      | —             | No                           |
 | Recurring payment reminder         | Payer      | —             | No                           |
+| Abandoned checkout recovery        | Payer      | `checkout_recovery` + merchant setting + suppression list | No |
 
 When a merchant has a category disabled, the corresponding email method returns early and no in-app notification is created for that event either.
 

@@ -80,6 +80,7 @@ import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
     ProductsModule,
     TeamModule,
     CustomersModule,
+    CheckoutSessionsModule,
   ],
   controllers: [AppController],
   providers: [

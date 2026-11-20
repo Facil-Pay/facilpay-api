@@ -694,6 +694,37 @@ export class EmailNotificationService {
     });
   }
 
+  async sendCheckoutRecoveryEmail(data: {
+    to: string;
+    recoveryUrl: string;
+    merchantName: string;
+    merchantLogo?: string | null;
+    primaryColor?: string | null;
+    formattedTotal: string;
+    currency: string;
+    items: Array<{ name: string; quantity: number }>;
+    locale?: string | null;
+  }): Promise<void> {
+    await this.enqueue({
+      to: data.to,
+      subject: `Complete your checkout at ${data.merchantName}`,
+      templateName: 'checkout-recovery',
+      templateData: {
+        merchantName: data.merchantName,
+        merchantLogo: data.merchantLogo ?? null,
+        primaryColor: data.primaryColor ?? null,
+        recoveryUrl: data.recoveryUrl,
+        formattedTotal: data.formattedTotal,
+        currency: data.currency,
+        items: data.items,
+      },
+      eventType: EmailEventType.INVOICE_CREATED,
+      recipientRole: 'payer',
+      includeUnsubscribe: true,
+      locale: data.locale,
+    });
+  }
+
   async sendRefundApprovalOutcome(
     to: string,
     paymentId: string,
