@@ -2,7 +2,6 @@ import {
   Controller,
   Get,
   Post,
-  Patch,
   Delete,
   Body,
   Param,
@@ -27,8 +26,12 @@ import { CheckoutSessionsService } from './checkout-sessions.service';
 import {
   ApplyCheckoutCouponDto,
   CreateCheckoutSessionDto,
+  SubmitShippingAddressDto,
 } from './dto/create-checkout-session.dto';
-import { CheckoutSession } from './entities/checkout-session.entity';
+import {
+  CheckoutSession,
+  CheckoutSessionStatus,
+} from './entities/checkout-session.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
@@ -43,7 +46,8 @@ export class CheckoutSessionsController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Create a new checkout session',
-    description: 'Creates a one-time checkout session with line items. Returns a publicId for the payer URL.',
+    description:
+      'Creates a one-time checkout session with line items. Returns a publicId for the payer URL.',
   })
   @ApiOkResponse({
     description: 'Checkout session created',
@@ -54,7 +58,12 @@ export class CheckoutSessionsController {
         merchantId: 'abc123-merchant-uuid',
         lineItems: [{ name: 'Product 1', quantity: 2, unitAmount: 1000 }],
         currency: 'USD',
-        total: 2000,
+        total: 2500,
+        shippingAddressCollection: { allowedCountries: ['US', 'CA'] },
+        shippingOptions: [
+          { id: 'standard', label: 'Standard shipping', amount: 500 },
+        ],
+        shippingAmount: 500,
         successUrl: 'https://example.com/success',
         cancelUrl: 'https://example.com/cancel',
         expiresAt: '2026-01-26T12:00:00.000Z',
@@ -63,7 +72,9 @@ export class CheckoutSessionsController {
       },
     },
   })
-  @ApiBadRequestResponse({ description: 'Validation failed or invalid line items' })
+  @ApiBadRequestResponse({
+    description: 'Validation failed or invalid line items',
+  })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   async create(
     @Body() dto: CreateCheckoutSessionDto,
@@ -77,7 +88,8 @@ export class CheckoutSessionsController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'Get checkout session by ID',
-    description: 'Returns a checkout session by its internal ID. Only returns sessions owned by the authenticated merchant.',
+    description:
+      'Returns a checkout session by its internal ID. Only returns sessions owned by the authenticated merchant.',
   })
   @ApiOkResponse({ description: 'Checkout session details' })
   @ApiNotFoundResponse({ description: 'Session not found' })
@@ -98,7 +110,9 @@ export class CheckoutSessionsController {
     description: 'Manually expires an OPEN checkout session.',
   })
   @ApiOkResponse({ description: 'Session expired successfully' })
-  @ApiBadRequestResponse({ description: 'Session is not open or already expired' })
+  @ApiBadRequestResponse({
+    description: 'Session is not open or already expired',
+  })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
   async expire(
     @Param('id', ParseUUIDPipe) id: string,
@@ -112,7 +126,8 @@ export class CheckoutSessionsController {
   @ApiBearerAuth('bearer')
   @ApiOperation({
     summary: 'List checkout sessions',
-    description: 'Returns all checkout sessions for the authenticated merchant.',
+    description:
+      'Returns all checkout sessions for the authenticated merchant.',
   })
   @ApiOkResponse({ description: 'List of checkout sessions' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT' })
@@ -137,7 +152,8 @@ export class CheckoutSessionsPublicController {
   @Get(':publicId/public')
   @ApiOperation({
     summary: 'Get public checkout session',
-    description: 'Returns public checkout session info for payers. No authentication required.',
+    description:
+      'Returns public checkout session info for payers. No authentication required.',
   })
   @ApiOkResponse({
     description: 'Public checkout session details',
@@ -149,8 +165,15 @@ export class CheckoutSessionsPublicController {
         lineItems: [{ name: 'Product 1', quantity: 2, unitAmount: 1000 }],
         subtotalFormatted: 'USD 20.00',
         discountFormatted: 'USD 2.00',
+        shippingFormatted: 'USD 5.00',
         couponCode: 'SPRING10',
-        totalFormatted: 'USD 18.00',
+        totalFormatted: 'USD 23.00',
+        shippingAddressCollection: { allowedCountries: ['US', 'CA'] },
+        shippingOptions: [
+          { id: 'standard', label: 'Standard shipping', amount: 500 },
+        ],
+        shippingAddress: null,
+        shippingOptionId: null,
         status: 'OPEN',
         isExpired: false,
         successUrl: 'https://example.com/success',
@@ -160,13 +183,13 @@ export class CheckoutSessionsPublicController {
   })
   @ApiNotFoundResponse({ description: 'Session not found' })
   @ApiGoneResponse({ description: 'Session has expired' })
-  async getPublic(
-    @Param('publicId') publicId: string,
-  ): Promise<object> {
+  async getPublic(@Param('publicId') publicId: string): Promise<object> {
     const { session, branding } = await this.service.getPublicSession(publicId);
 
-    const isExpired = session.status === 'EXPIRED' || 
-                      (session.status === 'OPEN' && new Date() > session.expiresAt);
+    const isExpired =
+      session.status === CheckoutSessionStatus.EXPIRED ||
+      (session.status === CheckoutSessionStatus.OPEN &&
+        new Date() > session.expiresAt);
 
     return {
       merchantDisplayName: branding.displayName,
@@ -174,10 +197,43 @@ export class CheckoutSessionsPublicController {
       primaryColor: branding.primaryColor,
       lineItems: session.lineItems,
       ...this.formatAmounts(session),
+      shippingAddressCollection: session.shippingAddressCollection ?? null,
+      shippingOptions: session.shippingOptions ?? [],
+      shippingAddress: session.shippingAddress ?? null,
+      shippingOptionId: session.shippingOptionId ?? null,
       status: session.status,
       isExpired,
       successUrl: session.successUrl,
       cancelUrl: session.cancelUrl,
+    };
+  }
+
+  @Post(':publicId/shipping-address')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Submit a shipping address for a checkout session',
+    description:
+      'Stores the payer shipping address on the session, validates the ISO country code against the merchant allowlist, applies the selected fixed shipping rate to the total and copies the address to the customer on completion. No authentication required.',
+  })
+  @ApiOkResponse({
+    description:
+      'Shipping address stored; returns recomputed amounts with shipping shown separately.',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Session does not collect shipping, invalid address, country not allowed or unknown shipping option',
+  })
+  @ApiNotFoundResponse({ description: 'Session not found' })
+  @ApiGoneResponse({ description: 'Session has expired' })
+  async submitShippingAddress(
+    @Param('publicId') publicId: string,
+    @Body() dto: SubmitShippingAddressDto,
+  ): Promise<object> {
+    const session = await this.service.submitShippingAddress(publicId, dto);
+    return {
+      ...this.formatAmounts(session),
+      shippingAddress: session.shippingAddress,
+      shippingOptionId: session.shippingOptionId,
     };
   }
 
@@ -192,7 +248,9 @@ export class CheckoutSessionsPublicController {
   @ApiBadRequestResponse({ description: 'Session is not open' })
   @ApiNotFoundResponse({ description: 'Session not found' })
   @ApiGoneResponse({ description: 'Session has expired' })
-  @ApiUnprocessableEntityResponse({ description: 'Coupon is invalid, expired, exhausted or does not apply' })
+  @ApiUnprocessableEntityResponse({
+    description: 'Coupon is invalid, expired, exhausted or does not apply',
+  })
   async applyCoupon(
     @Param('publicId') publicId: string,
     @Body() dto: ApplyCheckoutCouponDto,
@@ -217,10 +275,12 @@ export class CheckoutSessionsPublicController {
   }
 
   private formatAmounts(session: CheckoutSession) {
-    const format = (minor: number) => `${session.currency} ${(Number(minor) / 100).toFixed(2)}`;
+    const format = (minor: number) =>
+      `${session.currency} ${(Number(minor) / 100).toFixed(2)}`;
     return {
       subtotalFormatted: format(session.subtotal ?? session.total),
       discountFormatted: format(session.discountAmount ?? 0),
+      shippingFormatted: format(session.shippingAmount ?? 0),
       couponCode: session.couponCode ?? null,
       totalFormatted: format(session.total),
     };

@@ -25,7 +25,16 @@ Sessions have a status lifecycle: `OPEN` → `COMPLETE` or `EXPIRED`. Merchants 
     }
   ],
   "currency": "USD",
-  "total": 2000,
+  "total": 2500,
+  "subtotal": 2000,
+  "discountAmount": 0,
+  "shippingAddressCollection": { "allowedCountries": ["US", "CA"] },
+  "shippingOptions": [
+    { "id": "standard", "label": "Standard shipping", "amount": 500 }
+  ],
+  "shippingAddress": null,
+  "shippingOptionId": null,
+  "shippingAmount": 500,
   "customerId": "cus_123",
   "customerEmail": "customer@example.com",
   "successUrl": "https://example.com/success",
@@ -45,7 +54,14 @@ Sessions have a status lifecycle: `OPEN` → `COMPLETE` or `EXPIRED`. Merchants 
 | `merchantId` | UUID | Owner merchant identifier |
 | `lineItems` | Array | List of line items (see LineItem schema below) |
 | `currency` | String | ISO 4217 currency code (e.g., `USD`) |
-| `total` | Number | Total amount in smallest currency unit (e.g., cents) |
+| `subtotal` | Number | Line-item total before discount and shipping |
+| `discountAmount` | Number | Coupon discount in smallest currency unit |
+| `shippingAddressCollection` | Object | Shipping address settings (see below), or `null` |
+| `shippingOptions` | Array | Fixed shipping rates available for the session |
+| `shippingAddress` | Object | Address submitted by the payer, or `null` |
+| `shippingOptionId` | String | Selected shipping option id, or `null` |
+| `shippingAmount` | Number | Selected shipping rate in smallest currency unit |
+| `total` | Number | `subtotal - discountAmount + shippingAmount` |
 | `customerId` | String | Optional customer ID from merchant system |
 | `customerEmail` | String | Optional customer email |
 | `successUrl` | String | Redirect URL on successful payment |
@@ -75,6 +91,52 @@ Sessions have a status lifecycle: `OPEN` → `COMPLETE` or `EXPIRED`. Merchants 
 | `description` | String | Item description (max 500 characters, optional) |
 | `quantity` | Number | Quantity (positive integer) |
 | `unitAmount` | Number | Unit amount in smallest currency unit (optional if `productId` is provided) |
+
+### Shipping schemas
+
+`shippingAddressCollection` opts the session into address collection:
+
+```json
+{ "allowedCountries": ["US", "CA"] }
+```
+
+- `allowedCountries` — ISO 3166-1 alpha-2 codes. An empty array allows any valid country.
+  Addresses whose country is outside a non-empty allowlist are rejected.
+
+`shippingOptions` is an optional list of fixed rates:
+
+```json
+[
+  { "id": "standard", "label": "Standard shipping", "amount": 500 },
+  { "id": "express", "label": "Express shipping", "amount": 1200 }
+]
+```
+
+- `id` — unique identifier (max 64 characters), used when submitting the address
+- `label` — payer-facing label (max 100 characters)
+- `amount` — non-negative integer in the smallest currency unit
+
+A rate can be preselected at creation with `shippingOptionId`. Otherwise the payer
+selects one when submitting the address. The selected amount is included in `total`
+and reported separately as `shippingFormatted` on public responses.
+
+`shippingAddress` has the following shape:
+
+```json
+{
+  "name": "Jane Doe",
+  "line1": "123 Main St",
+  "line2": "Apt 4B",
+  "city": "New York",
+  "state": "NY",
+  "postalCode": "10001",
+  "country": "US"
+}
+```
+
+`line1`, `city`, `postalCode` and `country` are required. `country` must be a valid
+ISO 3166-1 alpha-2 code. The address is stored on the session and copied to the
+customer record (created when needed) when the session completes.
 
 ---
 
@@ -117,7 +179,12 @@ Authorization: Bearer <access_token>
   "customerEmail": "customer@example.com",
   "successUrl": "https://example.com/success",
   "cancelUrl": "https://example.com/cancel",
-  "expiresInMinutes": 30
+  "expiresInMinutes": 30,
+  "shippingAddressCollection": { "allowedCountries": ["US", "CA"] },
+  "shippingOptions": [
+    { "id": "standard", "label": "Standard shipping", "amount": 500 }
+  ],
+  "shippingOptionId": "standard"
 }
 ```
 
@@ -128,6 +195,9 @@ Authorization: Bearer <access_token>
 - `successUrl` (required) — Redirect URL on successful payment.
 - `cancelUrl` (required) — Redirect URL when payer cancels.
 - `expiresInMinutes` (optional) — Session expiry in minutes (default: 30, min: 5, max: 1440).
+- `shippingAddressCollection` (optional) — Enables shipping address collection and restricts delivery countries.
+- `shippingOptions` (optional) — Up to 20 fixed shipping rates added to the total when selected.
+- `shippingOptionId` (optional) — Preselects one of the `shippingOptions` at creation; its amount is added to the total immediately.
 
 **Response (200 OK):**
 ```json
@@ -351,7 +421,16 @@ Returns public checkout session info for payers. **No authentication required.**
       "unitAmount": 1000
     }
   ],
-  "totalFormatted": "$20.00",
+  "subtotalFormatted": "USD 50.00",
+  "discountFormatted": "USD 0.00",
+  "shippingFormatted": "USD 5.00",
+  "totalFormatted": "USD 55.00",
+  "shippingAddressCollection": { "allowedCountries": ["US", "CA"] },
+  "shippingOptions": [
+    { "id": "standard", "label": "Standard shipping", "amount": 500 }
+  ],
+  "shippingAddress": null,
+  "shippingOptionId": "standard",
   "status": "OPEN",
   "isExpired": false,
   "successUrl": "https://example.com/success",
@@ -363,7 +442,11 @@ Returns public checkout session info for payers. **No authentication required.**
 - `merchantLogo` — Merchant logo URL (nullable)
 - `primaryColor` — Merchant primary brand color
 - `lineItems` — Line items for the session
-- `totalFormatted` — Human-readable total (e.g., `$20.00`)
+- `subtotalFormatted` / `discountFormatted` — Line-item total and coupon discount, formatted
+- `shippingFormatted` — Shipping amount formatted separately from the subtotal
+- `totalFormatted` — Human-readable total including shipping (e.g., `USD 55.00`)
+- `shippingAddressCollection` / `shippingOptions` — Shipping configuration for the payer UI
+- `shippingAddress` / `shippingOptionId` — Address and rate submitted so far (`null` before submission)
 - `status` — Session status (`OPEN`, `COMPLETE`, `EXPIRED`)
 - `isExpired` — Whether the session is expired (status is `EXPIRED` or past `expiresAt`)
 - `successUrl` — Success redirect URL
@@ -389,6 +472,68 @@ Returns public checkout session info for payers. **No authentication required.**
 
 ---
 
+## Submit a Shipping Address
+
+```
+POST /v1/checkout/sessions/:publicId/shipping-address
+```
+
+Available only when the session was created with `shippingAddressCollection`.
+**No authentication required.**
+
+**Request Body:**
+```json
+{
+  "shippingAddress": {
+    "name": "Jane Doe",
+    "line1": "123 Main St",
+    "city": "New York",
+    "state": "NY",
+    "postalCode": "10001",
+    "country": "US"
+  },
+  "shippingOptionId": "standard"
+}
+```
+
+- `shippingAddress` (required) — `line1`, `city`, `postalCode` and ISO alpha-2 `country` are required.
+- `shippingOptionId` (required when the session offers shipping options and none was preselected).
+
+**Response (200 OK):**
+```json
+{
+  "subtotalFormatted": "USD 50.00",
+  "discountFormatted": "USD 0.00",
+  "shippingFormatted": "USD 5.00",
+  "totalFormatted": "USD 55.00",
+  "shippingAddress": {
+    "name": "Jane Doe",
+    "line1": "123 Main St",
+    "city": "New York",
+    "state": "NY",
+    "postalCode": "10001",
+    "country": "US"
+  },
+  "shippingOptionId": "standard"
+}
+```
+
+**Response (400 Bad Request):**
+```json
+{
+  "statusCode": 400,
+  "message": "Shipping to 'FR' is not allowed for this checkout session",
+  "error": "Bad Request"
+}
+```
+
+The address is validated (required fields, ISO country code and allowlist), stored on
+the session and copied to the customer when the session completes. The shipping amount
+is reported on its own line and included in the total and in the
+`checkout.session.completed` webhook payload.
+
+---
+
 ## Session Expiry
 
 Sessions have a default expiry of **30 minutes** after creation (configurable via `expiresInMinutes`). When a session expires:
@@ -406,8 +551,12 @@ Sessions can be expired manually via `POST /v1/checkout/sessions/:id/expire`.
 The `currency` field accepts ISO 4217 codes (e.g., `USD`, `EUR`, `GBP`). The total is calculated automatically from line items:
 
 ```
-total = sum(lineItem.quantity * lineItem.unitAmount)
+subtotal = sum(lineItem.quantity * lineItem.unitAmount)
+total    = subtotal - discountAmount + shippingAmount
 ```
+
+Shipping is never discounted. It is shown separately as `shippingFormatted` in all
+public checkout responses and in the completion webhook payload.
 
 Amounts are in the smallest currency unit:
 - `USD`: cents (1000 = $10.00)
@@ -482,6 +631,10 @@ curl -s -X GET "http://localhost:3000/v1/checkout/sessions/$SESSION_ID" \
 | 400 | `lineItems must be an array` | Invalid line items format |
 | 400 | `currency must be a valid ISO 4217 currency code` | Invalid currency code |
 | 400 | `Session is not open or already expired` | Trying to expire a non-OPEN session |
+| 400 | `Shipping address requires line1, city, postalCode and country` | Missing required address fields |
+| 400 | `Shipping country must be a valid ISO 3166-1 alpha-2 code` | Invalid country code |
+| 400 | `Shipping to 'FR' is not allowed for this checkout session` | Country outside the merchant allowlist |
+| 400 | `Unknown shipping option 'express'` | Shipping option id does not belong to the session |
 | 401 | `Missing or invalid JWT` | Authentication required |
 | 404 | `Session not found` | Session does not exist or belongs to another merchant |
 | 410 | `Session has expired` | Public checkout page for expired session |
@@ -498,6 +651,13 @@ publicId        VARCHAR(32) NOT NULL UNIQUE
 merchantId      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE
 lineItems       JSONB NOT NULL DEFAULT '[]'
 currency        VARCHAR(3) NOT NULL
+subtotal        DECIMAL(10, 2) NULL
+discountAmount  DECIMAL(10, 2) NOT NULL DEFAULT 0
+shippingAddressCollection JSONB NULL
+shippingOptions JSONB NOT NULL DEFAULT '[]'
+shippingAddress JSONB NULL
+shippingOptionId VARCHAR(64) NULL
+shippingAmount  DECIMAL(10, 2) NOT NULL DEFAULT 0
 total           DECIMAL(10, 2) NOT NULL
 customerId      VARCHAR(200)
 customerEmail   VARCHAR(320)
@@ -513,7 +673,10 @@ INDEX idx_checkout_sessions_merchant_id (merchantId)
 INDEX idx_checkout_sessions_public_id (publicId)
 ```
 
-Migration: `1751300000004-CreateCheckoutSessionsTable.ts`
+Migrations: `1751300000004-CreateCheckoutSessionsTable.ts`,
+`1792500000001-AddCheckoutSessionCoupons.ts`, `1792800000000-AddCheckoutSessionShipping.ts`.
+The shipping migration adds `customers."shippingAddress" jsonb NULL` as well; it is
+fully reversible with `npm run migrate:revert`.
 
 ---
 
@@ -526,7 +689,7 @@ Checkout session lifecycle events are delivered via webhooks. Subscribe to them 
 | `checkout.session.completed` | The payer completes payment and the session transitions `OPEN` → `COMPLETE` |
 | `checkout.session.expired`  | An open session is expired manually or by the 10-minute cron job            |
 
-Both events fire at most once per session. The payload includes the session ID, public ID, and (for completion) the resulting payment ID.
+Both events fire at most once per session. The payload includes the session ID, public ID, and (for completion) the resulting payment ID and customer email. When an address was collected, the `checkout.session.completed` payload also contains `shippingAddress`, `shippingAmount` and `shippingOptionId`, and the payment metadata contains `shippingAmount` and `shippingAddress` so the shipping line can be shown separately on receipts.
 
 ---
 

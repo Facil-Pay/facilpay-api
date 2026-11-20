@@ -1,5 +1,12 @@
-import { BadRequestException, GoneException, NotFoundException } from '@nestjs/common';
-import { CheckoutSession, CheckoutSessionStatus } from './entities/checkout-session.entity';
+import {
+  BadRequestException,
+  GoneException,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  CheckoutSession,
+  CheckoutSessionStatus,
+} from './entities/checkout-session.entity';
 import { CheckoutSessionsService } from './checkout-sessions.service';
 
 describe('CheckoutSessionsService', () => {
@@ -11,25 +18,31 @@ describe('CheckoutSessionsService', () => {
   let productsService: any;
   let configService: any;
   let appLogger: any;
+  let couponsService: any;
 
-  const makeSession = (overrides: Partial<CheckoutSession> = {}): CheckoutSession => ({
-    id: 'session-id',
-    publicId: 'pub-id-1234567890ab',
-    merchantId: 'merchant-1',
-    lineItems: [{ name: 'Item', quantity: 1, unitAmount: 1000, productId: null }],
-    currency: 'USD',
-    total: 1000,
-    customerId: null,
-    customerEmail: null,
-    successUrl: 'https://example.com/success',
-    cancelUrl: 'https://example.com/cancel',
-    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
-    status: CheckoutSessionStatus.OPEN,
-    paymentId: null,
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-    ...overrides,
-  }) as CheckoutSession;
+  const makeSession = (
+    overrides: Partial<CheckoutSession> = {},
+  ): CheckoutSession =>
+    ({
+      id: 'session-id',
+      publicId: 'pub-id-1234567890ab',
+      merchantId: 'merchant-1',
+      lineItems: [
+        { name: 'Item', quantity: 1, unitAmount: 1000, productId: null },
+      ],
+      currency: 'USD',
+      total: 1000,
+      customerId: null,
+      customerEmail: null,
+      successUrl: 'https://example.com/success',
+      cancelUrl: 'https://example.com/cancel',
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      status: CheckoutSessionStatus.OPEN,
+      paymentId: null,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      ...overrides,
+    }) as CheckoutSession;
 
   beforeEach(() => {
     sessionRepo = {
@@ -66,6 +79,11 @@ describe('CheckoutSessionsService', () => {
         warn: jest.fn(),
       }),
     };
+    couponsService = {
+      validateForCheckoutSession: jest.fn(),
+      redeem: jest.fn().mockResolvedValue(undefined),
+      releaseRedemption: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new CheckoutSessionsService(
       sessionRepo,
@@ -75,6 +93,7 @@ describe('CheckoutSessionsService', () => {
       productsService,
       configService,
       appLogger,
+      couponsService,
     );
   });
 
@@ -84,7 +103,10 @@ describe('CheckoutSessionsService', () => {
     it('dispatches checkout.session.expired when a session is expired manually', async () => {
       const session = makeSession({ status: CheckoutSessionStatus.OPEN });
       sessionRepo.findOne.mockResolvedValue(session);
-      sessionRepo.save.mockResolvedValue({ ...session, status: CheckoutSessionStatus.EXPIRED });
+      sessionRepo.save.mockResolvedValue({
+        ...session,
+        status: CheckoutSessionStatus.EXPIRED,
+      });
 
       await service.expire('session-id', 'merchant-1');
 
@@ -114,7 +136,10 @@ describe('CheckoutSessionsService', () => {
       sessionRepo.findOne.mockResolvedValue(session);
       paymentsService.create.mockResolvedValue({ id: 'pay-123' });
 
-      const result = await service.completeSession('pub-id-1234567890ab', 'buyer@example.com');
+      const result = await service.completeSession(
+        'pub-id-1234567890ab',
+        'buyer@example.com',
+      );
 
       expect(result.payment.id).toBe('pay-123');
       expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledTimes(1);
@@ -131,7 +156,7 @@ describe('CheckoutSessionsService', () => {
     });
 
     it('does not dispatch checkout.session.completed when session is not open', async () => {
-      const session = makeSession({ status: CheckoutSessionStatus.EXPIRED });
+      const session = makeSession({ status: CheckoutSessionStatus.COMPLETE });
       sessionRepo.findOne.mockResolvedValue(session);
 
       await expect(
@@ -142,8 +167,18 @@ describe('CheckoutSessionsService', () => {
     });
 
     it('dispatches checkout.session.expired for each stale session in the cron job', async () => {
-      const stale1 = makeSession({ id: 's1', merchantId: 'merchant-a', publicId: 'pub1' });
-      const stale2 = makeSession({ id: 's2', merchantId: 'merchant-b', publicId: 'pub2' });
+      const stale1 = makeSession({
+        id: 's1',
+        merchantId: 'merchant-a',
+        publicId: 'pub1',
+        expiresAt: new Date(Date.now() - 60 * 1000),
+      });
+      const stale2 = makeSession({
+        id: 's2',
+        merchantId: 'merchant-b',
+        publicId: 'pub2',
+        expiresAt: new Date(Date.now() - 60 * 1000),
+      });
       const fresh = makeSession({
         id: 's3',
         merchantId: 'merchant-c',
@@ -222,7 +257,9 @@ describe('CheckoutSessionsService', () => {
       });
       sessionRepo.findOne.mockResolvedValue(session);
 
-      await expect(service.getPublicSession('pub-id')).rejects.toThrow(GoneException);
+      await expect(service.getPublicSession('pub-id')).rejects.toThrow(
+        GoneException,
+      );
     });
 
     it('throws Gone when an open session has passed its expiry', async () => {
@@ -232,7 +269,9 @@ describe('CheckoutSessionsService', () => {
       });
       sessionRepo.findOne.mockResolvedValue(session);
 
-      await expect(service.getPublicSession('pub-id')).rejects.toThrow(GoneException);
+      await expect(service.getPublicSession('pub-id')).rejects.toThrow(
+        GoneException,
+      );
     });
   });
 });

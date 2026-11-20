@@ -22,6 +22,14 @@ Customer email addresses are unique per merchant (case-insensitive). Multiple me
     "locale": "en-US"
   },
   "tags": ["vip", "wholesale"],
+  "shippingAddress": {
+    "name": "Jane Doe",
+    "line1": "123 Main St",
+    "city": "New York",
+    "state": "NY",
+    "postalCode": "10001",
+    "country": "US"
+  },
   "createdAt": "2026-09-25T10:00:00.000Z",
   "updatedAt": "2026-09-25T10:00:00.000Z",
   "deletedAt": null
@@ -37,6 +45,7 @@ Customer email addresses are unique per merchant (case-insensitive). Multiple me
 | `phone` | String | Customer phone number (nullable) |
 | `metadata` | Object | Arbitrary JSON object (nullable) |
 | `tags` | String[] | Segmentation tags, lowercase, unique, at most 20 (empty array when untagged) |
+| `shippingAddress` | Object | Last shipping address collected through a checkout session (nullable) |
 | `createdAt` | Timestamp | Creation timestamp |
 | `updatedAt` | Timestamp | Last update timestamp |
 | `deletedAt` | Timestamp | Soft-delete timestamp (null if active) |
@@ -530,6 +539,7 @@ name         VARCHAR(255)
 phone        VARCHAR(50)
 metadata     JSONB
 tags         TEXT[] NOT NULL DEFAULT '{}'
+shippingAddress JSONB
 createdAt    TIMESTAMP NOT NULL
 updatedAt    TIMESTAMP NOT NULL
 deletedAt    TIMESTAMP  -- Soft delete timestamp
@@ -540,7 +550,7 @@ INDEX idx_customers_email (email)
 INDEX IDX_customers_tags USING GIN (tags)
 ```
 
-Migration: TBD. The `tags` column and its GIN index are added by `AddTagsToCustomers1792500000000`.
+Migration: TBD. The `tags` column and its GIN index are added by `AddTagsToCustomers1792500000000`; the `shippingAddress` column is added by `AddCheckoutSessionShipping1792800000000`. When a checkout session with a collected address completes, the address is copied here (a customer is created when none exists for the payer email).
 
 ---
 

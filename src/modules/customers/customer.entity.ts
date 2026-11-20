@@ -7,6 +7,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import type { ShippingAddress } from '../checkout-sessions/entities/checkout-session.entity';
 
 @Entity('customers')
 @Index('IDX_customers_merchantId', ['merchantId'])
@@ -28,6 +29,10 @@ export class Customer {
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: Record<string, unknown> | null;
+
+  /** Last shipping address collected through a checkout session. */
+  @Column({ type: 'jsonb', nullable: true })
+  shippingAddress: ShippingAddress | null;
 
   @Index('IDX_customers_tags', { synchronize: false })
   @Column({ type: 'text', array: true, default: () => "'{}'" })
