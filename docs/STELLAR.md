@@ -320,3 +320,83 @@ Returns the Friendbot response payload.
 | `400`  | Invalid request or not in testnet mode            |
 | `401`  | Missing or invalid JWT                            |
 | `500`  | Failed to fund the testnet account                |
+
+---
+
+## Muxed Deposit Addresses (SEP-23)
+
+Memos are optional for payers and often forgotten, which makes matching an
+incoming deposit back to a payment unreliable. When a merchant opts in, each
+payment gets its own [muxed account](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0023.md)
+(`M...`) deposit address derived from the merchant's base account
+(`STELLAR_MERCHANT_ACCOUNT_ID`). The embedded uint64 ID identifies the payment
+on-chain, so no memo is needed.
+
+The muxed ID is derived deterministically from the payment UUID, and the address
+is stored on the payment as `depositAddress` (with the numeric ID in
+`muxedId`).
+
+### Per-merchant feature flag
+
+Muxed addresses are rolled out gradually through merchant settings:
+
+```
+PATCH /v1/merchants/me/settings
+```
+
+```json
+{
+  "muxedAccountsEnabled": true
+}
+```
+
+When the flag is off (the default), payment creation behaves exactly as before
+and `depositAddress`/`muxedId` stay `null`. When the flag is on but
+`STELLAR_MERCHANT_ACCOUNT_ID` is missing or invalid, no address is generated and
+the payment keeps the legacy memo flow.
+
+### Payment responses
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "amount": "100.50",
+  "currency": "USD",
+  "status": "PENDING",
+  "depositAddress": "MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ",
+  "muxedId": "441234567890123456"
+}
+```
+
+`POST /v1/payments`, `POST /v1/payments/bulk` and `GET /v1/payments/:id` return
+the generated address.
+
+### Matching incoming deposits
+
+`StellarHorizonStreamService` still streams payments for the merchant base
+account. For each incoming payment it now:
+
+1. Matches a pending payment by `muxedId` (from the Horizon `to_muxed_id`
+   field) and verifies the amount.
+2. Falls back to matching `externalReference` against the transaction memo when
+   no payment matches the muxed ID.
+
+Payments matched by muxed ID are confirmed even when the payer sent no memo. A
+matched-but-underpaid deposit is not auto-confirmed and does not fall back to
+memo matching.
+
+### SEP-7 URIs and QR codes
+
+`GET /v1/payments/:id/qr` (both `data=sep7` and `data=payment`) targets the
+muxed `depositAddress` and omits the memo when one exists.
+
+### Database
+
+```bash
+npm run migrate
+npm run migrate:revert
+```
+
+Migration `AddMuxedAccountDepositAddresses1792800000000` adds
+`payments.depositAddress`, `payments.muxedId` (both indexed) and
+`merchant_settings.muxedAccountsEnabled`; the revert drops them.

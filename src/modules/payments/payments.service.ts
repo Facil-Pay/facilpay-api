@@ -51,6 +51,11 @@ import { normalizeLocale } from '../notifications/i18n/locale';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { PaymentLinksService } from '../payment-links/payment-links.service';
 import { StellarService } from '../stellar/stellar.service';
+import {
+  buildMuxedAddress,
+  deriveMuxedId,
+  isValidBaseAccount,
+} from '../stellar/muxed-account.util';
 import { UsersService } from '../users/users.service';
 import { SettlementAdjustment } from '../settlements/entities/settlement-adjustment.entity';
 import { EventsService } from '../events/events.service';
@@ -407,6 +412,11 @@ export class PaymentsService {
       });
 
       const savedPayment = await queryRunner.manager.save(payment);
+      await this.assignMuxedDepositAddress(
+        savedPayment,
+        merchantId,
+        queryRunner.manager,
+      );
 
       if (invoice) {
         invoice.paymentId = savedPayment.id;
@@ -594,6 +604,16 @@ export class PaymentsService {
       );
 
       const savedPayments = await queryRunner.manager.save(payments);
+      const savedPaymentList = Array.isArray(savedPayments)
+        ? savedPayments
+        : [savedPayments];
+      for (const savedPayment of savedPaymentList) {
+        await this.assignMuxedDepositAddress(
+          savedPayment,
+          savedPayment.merchantId,
+          queryRunner.manager,
+        );
+      }
 
       await queryRunner.commitTransaction();
       for (const warning of limitWarnings) {
@@ -624,6 +644,37 @@ export class PaymentsService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  /**
+   * Stamps the payment with its muxed (M...) deposit address when the merchant
+   * has opted into muxed accounts. No-op when the feature is disabled or no
+   * valid base account is configured.
+   */
+  private async assignMuxedDepositAddress(
+    payment: Payment,
+    merchantId: string | null | undefined,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (!merchantId) return;
+
+    const settingsRepository = manager
+      ? manager.getRepository(MerchantSettings)
+      : this.merchantSettingsRepository;
+    const settings = await settingsRepository.findOneBy({ merchantId });
+    if (!settings?.muxedAccountsEnabled) return;
+
+    const baseAccount = this.configService.get<string>(
+      'STELLAR_MERCHANT_ACCOUNT_ID',
+    );
+    if (!baseAccount || !isValidBaseAccount(baseAccount)) {
+      return;
+    }
+
+    const muxedId = deriveMuxedId(payment.id);
+    payment.muxedId = muxedId;
+    payment.depositAddress = buildMuxedAddress(baseAccount, muxedId);
+    await (manager ?? this.paymentRepository.manager).save(payment);
   }
 
   private async sendMerchantLimitWarnings(

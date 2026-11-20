@@ -23,6 +23,13 @@ export class MerchantSettings {
   @Column({ default: true })
   remindersEnabled: boolean = true;
 
+  /**
+   * Feature flag for per-payment Stellar muxed (M-address) deposit addresses.
+   * Enabled per merchant so the rollout can be gradual.
+   */
+  @Column({ default: false })
+  muxedAccountsEnabled: boolean = false;
+
   @Column('int', { array: true, default: [-3, 0, 7] })
   reminderOffsets: number[] = [-3, 0, 7];
 

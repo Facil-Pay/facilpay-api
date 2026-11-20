@@ -43,6 +43,7 @@ export class MerchantsService {
     const settings = await this.getSettings(merchantId) ?? this.settingsRepo.create({ merchantId });
     if (dto.idleSessionTimeoutMinutes !== undefined) settings.idleSessionTimeoutMinutes = dto.idleSessionTimeoutMinutes;
     if (dto.remindersEnabled !== undefined) settings.remindersEnabled = dto.remindersEnabled;
+    if (dto.muxedAccountsEnabled !== undefined) settings.muxedAccountsEnabled = dto.muxedAccountsEnabled;
     if (dto.reminderOffsets !== undefined) settings.reminderOffsets = dto.reminderOffsets;
     if (dto.timezone !== undefined) settings.timezone = dto.timezone;
     if (dto.refundApprovalThresholds !== undefined) settings.refundApprovalThresholds = dto.refundApprovalThresholds;
