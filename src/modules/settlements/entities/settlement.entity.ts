@@ -55,6 +55,35 @@ export class Settlement {
   @Column({ nullable: true })
   stellarTransactionHash: string | null;
 
+  /** Stellar asset the payout was settled in (XLM or CODE:ISSUER). */
+  @Column({ length: 64, nullable: true })
+  settlementAsset: string | null = null;
+
+  /** Stellar asset the payer actually sent, when a conversion was needed. */
+  @Column({ length: 255, nullable: true })
+  sourceAsset: string | null = null;
+
+  @Column({ type: 'decimal', precision: 20, scale: 7, nullable: true })
+  sourceAmount: number | null = null;
+
+  @Column({ type: 'decimal', precision: 20, scale: 7, nullable: true })
+  destAmount: number | null = null;
+
+  /** destination amount / source amount. */
+  @Column({ type: 'decimal', precision: 20, scale: 8, nullable: true })
+  conversionRate: number | null = null;
+
+  /** Deviation between the quoted and executed conversion, in percent. */
+  @Column({ type: 'decimal', precision: 10, scale: 6, nullable: true })
+  slippagePercent: number | null = null;
+
+  /** Stellar network fee paid for the path payment, in XLM. */
+  @Column({ type: 'decimal', precision: 20, scale: 7, nullable: true })
+  conversionFee: number | null = null;
+
+  @Column({ length: 64, nullable: true })
+  conversionTransactionHash: string | null = null;
+
   @Column({ nullable: true })
   failureReason: string | null;
 

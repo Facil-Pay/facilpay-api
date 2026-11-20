@@ -1,3 +1,5 @@
+jest.mock('../../tracing', () => ({ getTraceId: jest.fn(), initializeTracing: jest.fn() }));
+
 import { SettlementsService } from './settlements.service';
 import { MerchantSettlementConfig, SettlementSchedule } from './entities/merchant-settlement-config.entity';
 import { RefundStatus } from '../payments/refund.entity';

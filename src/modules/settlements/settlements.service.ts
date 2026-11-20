@@ -31,6 +31,36 @@ import {
 } from '../../common/interfaces/paginated-result.interface';
 import { EventsService } from '../events/events.service';
 import { SettlementStatus } from './entities/settlement.entity';
+import {
+  StellarHorizonClientService,
+  PathQuoteResult,
+} from '../stellar/stellar-horizon-client.service';
+import {
+  parseSettlementAsset,
+  sameSettlementAsset,
+  assetFromPath,
+  toStellarAmount,
+  SettlementAssetRef,
+} from './settlement-asset.util';
+
+interface SettlementConversionPlan {
+  ref: SettlementAssetRef;
+  amount: number;
+  quote: PathQuoteResult;
+  destMin: string;
+}
+
+interface SettlementConversionResult {
+  settlementAsset: string;
+  sourceAsset: string;
+  sourceAmount: number;
+  destAmount: number;
+  conversionRate: number;
+  slippagePercent: number;
+  conversionFee: number;
+  conversionTransactionHash: string | null;
+  pendingSignatures: boolean;
+}
 
 interface SettlementStatementRow {
   paymentId: string;
@@ -69,6 +99,7 @@ export class SettlementsService {
     private readonly authService: AuthService,
     private readonly stellarService: StellarService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly horizonClientService: StellarHorizonClientService,
   ) {
     this.settleOnGross =
       String(
@@ -272,10 +303,17 @@ export class SettlementsService {
     return saved;
   }
 
-  async getEligibleDestination(merchantId: string, destinationId: string, currency: string): Promise<PayoutDestination> {
+  async getEligibleDestination(
+    merchantId: string,
+    destinationId: string,
+    currency: string,
+    settlementAssetInput?: string | null,
+  ): Promise<PayoutDestination> {
     const destination = await this.destinationRepo.findOneBy({ id: destinationId, merchantId });
-    if (!destination || destination.assetCode !== currency) {
-      throw new BadRequestException('Payout destination does not match the settlement currency');
+    const preferred = parseSettlementAsset(settlementAssetInput);
+    const expectedCode = preferred?.code ?? currency;
+    if (!destination || destination.assetCode !== expectedCode) {
+      throw new BadRequestException('Payout destination does not match the settlement asset');
     }
     if (!destination.verifiedAt) {
       throw new BadRequestException('Payout destination must be email verified before use');
@@ -287,15 +325,23 @@ export class SettlementsService {
   }
 
   async upsertConfig(userId: string, dto: UpsertSettlementConfigDto): Promise<MerchantSettlementConfig> {
+    const preferred = parseSettlementAsset(dto.settlementAsset);
     let config = await this.configRepo.findOneBy({ userId, currency: dto.currency });
     if (!config) {
       config = this.configRepo.create({ userId, ...dto });
     } else {
       config.schedule = dto.schedule;
       config.destinationId = dto.destinationId ?? null;
+      config.settlementAsset = dto.settlementAsset ?? null;
+      config.maxSlippagePercent = dto.maxSlippagePercent ?? Number(config.maxSlippagePercent ?? 0.5);
     }
     if (dto.destinationId) {
-      await this.getEligibleDestination(userId, dto.destinationId, dto.currency);
+      await this.getEligibleDestination(
+        userId,
+        dto.destinationId,
+        dto.currency,
+        preferred?.normalized ?? null,
+      );
     }
     return this.configRepo.save(config);
   }
@@ -400,6 +446,16 @@ export class SettlementsService {
     period: { from: Date | null; to: Date };
     rows: SettlementStatementRow[];
     totals: SettlementStatementRow;
+    conversion: {
+      settlementAsset: string | null;
+      sourceAsset: string | null;
+      sourceAmount: number | null;
+      destAmount: number | null;
+      conversionRate: number | null;
+      slippagePercent: number | null;
+      conversionFee: number | null;
+      conversionTransactionHash: string | null;
+    };
   }> {
     const settlement = await this.settlementRepo.findOneBy({ id: settlementId });
     if (!settlement) throw new NotFoundException(`Settlement ${settlementId} not found`);
@@ -465,6 +521,16 @@ export class SettlementsService {
       period: { from, to: settlement.processedAt },
       rows,
       totals,
+      conversion: {
+        settlementAsset: settlement.settlementAsset,
+        sourceAsset: settlement.sourceAsset,
+        sourceAmount: settlement.sourceAmount,
+        destAmount: settlement.destAmount,
+        conversionRate: settlement.conversionRate,
+        slippagePercent: settlement.slippagePercent,
+        conversionFee: settlement.conversionFee,
+        conversionTransactionHash: settlement.conversionTransactionHash,
+      },
     };
   }
 
@@ -615,6 +681,185 @@ export class SettlementsService {
     };
   }
 
+  private getMaxSlippagePercent(config: MerchantSettlementConfig): number {
+    const value = Number(config.maxSlippagePercent ?? 0.5);
+    return Number.isFinite(value) && value >= 0 && value <= 100 ? value : 0.5;
+  }
+
+  private async resolveSourceAssetGroups(
+    config: MerchantSettlementConfig,
+    payments: Payment[],
+  ): Promise<Map<string, { ref: SettlementAssetRef; weight: number }>> {
+    const groups = new Map<string, { ref: SettlementAssetRef; weight: number }>();
+    let platformBalances: Array<{ assetCode: string; assetIssuer: string }> | null = null;
+
+    for (const payment of payments) {
+      const metadata = (payment.metadata ?? {}) as Record<string, string>;
+      const code = String(metadata.assetCode || payment.currency || '').toUpperCase();
+      const issuer = metadata.assetIssuer;
+      let ref: SettlementAssetRef | null = null;
+
+      if (code === 'XLM') {
+        ref = parseSettlementAsset('XLM');
+      } else if (issuer) {
+        ref = parseSettlementAsset(`${code}:${issuer}`);
+      } else if (/^[A-Z0-9]{1,12}$/.test(code)) {
+        ref = parseSettlementAsset(code);
+        if (ref) {
+          ref = sameSettlementAsset(ref, parseSettlementAsset(config.settlementAsset))
+            ? parseSettlementAsset(config.settlementAsset)
+            : null;
+        }
+        if (!ref) {
+          const balances = platformBalances ?? await this.stellarService.getBalances(config.userId);
+          platformBalances = balances;
+          const balance = balances.find(
+            (entry) => entry.assetCode === code && entry.assetIssuer,
+          );
+          if (!balance) {
+            throw new BadRequestException(
+              `Cannot resolve the Stellar issuer for payment ${payment.id} (${code})`,
+            );
+          }
+          ref = parseSettlementAsset(`${code}:${balance.assetIssuer}`);
+        }
+      } else {
+        throw new BadRequestException(
+          `Payment ${payment.id} has no resolvable Stellar source asset`,
+        );
+      }
+
+      if (!ref) continue;
+      const settled = Math.max(
+        0,
+        Number(
+          this.settleOnGross
+            ? payment.amount
+            : (payment.netAmount ?? Number(payment.amount) - Number(payment.feeAmount || 0)),
+        ),
+      );
+      const current = groups.get(ref.normalized);
+      if (current) current.weight += settled;
+      else groups.set(ref.normalized, { ref, weight: settled });
+    }
+
+    return groups;
+  }
+
+  private async planConversions(
+    config: MerchantSettlementConfig,
+    payments: Payment[],
+    netAmount: number,
+    preferred: SettlementAssetRef,
+  ): Promise<SettlementConversionPlan[]> {
+    const groups = await this.resolveSourceAssetGroups(config, payments);
+    const totalWeight = [...groups.values()].reduce((sum, group) => sum + group.weight, 0);
+    if (totalWeight <= 0) return [];
+
+    const limit = this.getMaxSlippagePercent(config);
+    const plans: SettlementConversionPlan[] = [];
+    for (const { ref, weight } of groups.values()) {
+      if (sameSettlementAsset(ref, preferred)) continue;
+      const amount = Math.round((netAmount * weight / totalWeight) * 1e7) / 1e7;
+      if (amount <= 0) continue;
+
+      const quote = await this.horizonClientService.getPathQuote(
+        ref.normalized,
+        preferred.normalized,
+        toStellarAmount(amount),
+        'strict-send',
+      );
+      if (
+        quote.slippageEstimatePercent !== null &&
+        quote.slippageEstimatePercent > limit
+      ) {
+        throw new BadRequestException(
+          `Conversion slippage estimate ${quote.slippageEstimatePercent}% exceeds the ${limit}% limit`,
+        );
+      }
+
+      const destMin = (Number(quote.destAmount) * (1 - limit / 100)).toFixed(7);
+      if (!Number.isFinite(Number(destMin)) || Number(destMin) <= 0) {
+        throw new BadRequestException('Conversion quote returned an invalid destination amount');
+      }
+      plans.push({ ref, amount, quote, destMin });
+    }
+    return plans;
+  }
+
+  private async convertToSettlementAsset(
+    config: MerchantSettlementConfig,
+    payments: Payment[],
+    netAmount: number,
+    destination: PayoutDestination,
+  ): Promise<SettlementConversionResult | null> {
+    const preferred = parseSettlementAsset(config.settlementAsset);
+    if (!preferred) return null;
+
+    const plans = await this.planConversions(config, payments, netAmount, preferred);
+    if (plans.length === 0) return null;
+
+    const limit = this.getMaxSlippagePercent(config);
+    let sourceAmount = 0;
+    let destAmount = 0;
+    let conversionFee = 0;
+    let slippagePercent = 0;
+    let conversionTransactionHash: string | null = null;
+    let pendingSignatures = false;
+
+    for (const plan of plans) {
+      const result = await this.stellarService.convertAsset({
+        sourceAsset: plan.ref.asset,
+        destAsset: preferred.asset,
+        sourceAmount: toStellarAmount(plan.amount),
+        destMin: plan.destMin,
+        path: plan.quote.path.map(assetFromPath),
+        destination: destination.stellarAddress,
+        merchantId: config.userId,
+      });
+
+      if (result.status === 'pending_signatures') {
+        pendingSignatures = true;
+        continue;
+      }
+      if (!result.hash) {
+        throw new BadRequestException('Stellar conversion did not return a transaction hash');
+      }
+
+      const expected = Number(plan.quote.destAmount);
+      const actual = result.destAmount !== undefined ? Number(result.destAmount) : expected;
+      if (!Number.isFinite(actual) || actual < Number(plan.destMin)) {
+        throw new BadRequestException(
+          `Conversion slippage exceeded the ${limit}% limit`,
+        );
+      }
+      const slippage = expected > 0 ? Math.max(0, (expected - actual) / expected * 100) : 0;
+      if (slippage > limit) {
+        throw new BadRequestException(
+          `Conversion slippage ${slippage.toFixed(4)}% exceeds the ${limit}% limit`,
+        );
+      }
+
+      sourceAmount += plan.amount;
+      destAmount += actual;
+      conversionFee += Number(result.fee ?? 0);
+      slippagePercent = Math.max(slippagePercent, slippage);
+      conversionTransactionHash = result.hash;
+    }
+
+    return {
+      settlementAsset: preferred.normalized,
+      sourceAsset: plans.map((plan) => plan.ref.normalized).join(','),
+      sourceAmount: Math.round(sourceAmount * 1e7) / 1e7,
+      destAmount: Math.round(destAmount * 1e7) / 1e7,
+      conversionRate: sourceAmount > 0 ? Math.round((destAmount / sourceAmount) * 1e8) / 1e8 : 0,
+      slippagePercent: Math.round(slippagePercent * 1e6) / 1e6,
+      conversionFee: Math.round(conversionFee * 1e7) / 1e7,
+      conversionTransactionHash,
+      pendingSignatures,
+    };
+  }
+
   private async processMerchantSettlement(
     config: MerchantSettlementConfig,
   ): Promise<Settlement | null> {
@@ -645,10 +890,11 @@ export class SettlementsService {
       if (!lockedConfig.destinationId) {
         throw new BadRequestException('A verified payout destination is required for settlement');
       }
-      await this.getEligibleDestination(
+      const destination = await this.getEligibleDestination(
         lockedConfig.userId,
         lockedConfig.destinationId,
         lockedConfig.currency,
+        lockedConfig.settlementAsset,
       );
 
       const calculation = await this.calculateSettlement(queryRunner.manager, lockedConfig);
@@ -657,6 +903,14 @@ export class SettlementsService {
         await queryRunner.rollbackTransaction();
         return null;
       }
+
+      const conversion = await this.convertToSettlementAsset(
+        lockedConfig,
+        completedPayments,
+        netAmount,
+        destination,
+      );
+
       const reserveDays = lockedConfig.reserveDays || 0;
       // Calculate release date
       const reservedReleaseAt = reserveDays > 0 
@@ -675,6 +929,14 @@ export class SettlementsService {
         paymentIds: completedPayments.map((p) => p.id),
         processedAt: new Date(),
         status: SettlementStatus.PENDING,
+        settlementAsset: conversion?.settlementAsset ?? null,
+        sourceAsset: conversion?.sourceAsset ?? null,
+        sourceAmount: conversion?.sourceAmount ?? null,
+        destAmount: conversion?.destAmount ?? null,
+        conversionRate: conversion?.conversionRate ?? null,
+        slippagePercent: conversion?.slippagePercent ?? null,
+        conversionFee: conversion?.conversionFee ?? null,
+        conversionTransactionHash: conversion?.conversionTransactionHash ?? null,
       });
 
       const savedSettlement = await queryRunner.manager.save(settlement);
@@ -717,9 +979,11 @@ export class SettlementsService {
       
       await queryRunner.manager.save(lockedConfig);
 
-      // Mark settlement as completed
-      savedSettlement.status = SettlementStatus.COMPLETED;
-      await queryRunner.manager.save(savedSettlement);
+      // A conversion awaiting additional signatures cannot be marked completed yet.
+      if (!conversion?.pendingSignatures) {
+        savedSettlement.status = SettlementStatus.COMPLETED;
+        await queryRunner.manager.save(savedSettlement);
+      }
 
       await queryRunner.commitTransaction();
 
@@ -742,6 +1006,7 @@ export class SettlementsService {
           schedule: config.schedule,
           totalAmount: 0,
           currency: config.currency,
+          settlementAsset: config.settlementAsset ?? null,
           paymentIds: [],
           processedAt: new Date(),
           status: SettlementStatus.FAILED,
@@ -771,6 +1036,16 @@ export class SettlementsService {
       currency: settlement.currency,
       paymentCount,
       stellarTransactionHash: settlement.stellarTransactionHash,
+      conversion: {
+        settlementAsset: settlement.settlementAsset,
+        sourceAsset: settlement.sourceAsset,
+        sourceAmount: settlement.sourceAmount,
+        destAmount: settlement.destAmount,
+        conversionRate: settlement.conversionRate,
+        slippagePercent: settlement.slippagePercent,
+        conversionFee: settlement.conversionFee,
+        conversionTransactionHash: settlement.conversionTransactionHash,
+      },
       failureReason,
     };
 

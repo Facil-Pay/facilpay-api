@@ -34,6 +34,14 @@ export class MerchantSettlementConfig {
   @Column({ length: 3 })
   currency: string;
 
+  /** Preferred Stellar settlement asset: XLM or CODE:ISSUER. */
+  @Column({ length: 64, nullable: true })
+  settlementAsset: string | null = null;
+
+  /** Maximum tolerated conversion slippage, in percent. */
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0.5 })
+  maxSlippagePercent: number = 0.5;
+
   @Column({ type: 'uuid', nullable: true })
   destinationId: string | null = null;
 

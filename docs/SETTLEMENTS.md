@@ -4,6 +4,8 @@
 
 The settlements module lets merchants configure a payout schedule and view settlement history. FacilPay automatically batches completed payments into settlement records on a configurable frequency (daily, weekly, or monthly). Each settlement groups payments by merchant and currency, records the total amount, and links back to the individual payment IDs included in the batch.
 
+Merchants can also choose a **preferred Stellar settlement asset** (`settlementAsset`). Balances received in a different asset are converted to it at settlement time with a Stellar path payment, subject to a configurable maximum slippage.
+
 Settlement processing is driven by cron jobs that run in the background. Merchants can also be triggered manually by an administrator for ad-hoc settlement runs.
 
 ## Configuration
@@ -45,6 +47,8 @@ GET /v1/settlements/:id/statement?format=pdf|csv
 
 Downloads a reconciliation statement for one settlement. The statement header includes the merchant, settlement period, currency, and transaction hash when available. Its rows include payment ID, external reference, gross amount, fee, net amount, refunds, and settlement adjustments, followed by totals.
 
+When a conversion took place, the header also reports `settlementAsset`, `sourceAsset`, `sourceAmount`, `destAmount`, `conversionRate`, `slippagePercent`, `conversionFee` (in XLM) and `conversionTransactionHash`. The PDF statement includes the same conversion details under an "Asset conversion" section.
+
 The settlement owner or an administrator may download the statement. CSV values are escaped and protected against spreadsheet formula injection.
 
 ### Configure Settlement Schedule
@@ -53,21 +57,27 @@ The settlement owner or an administrator may download the statement. CSV values 
 POST /v1/settlements/config
 ```
 
-Creates or updates the calling merchant's settlement schedule. Each merchant can have one active configuration.
+Creates or updates the calling merchant's settlement schedule. Each merchant can have one active configuration per currency.
 
 **Request Body**
 
 ```json
 {
   "schedule": "weekly",
-  "currency": "USD"
+  "currency": "USD",
+  "settlementAsset": "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
+  "maxSlippagePercent": 0.5
 }
 ```
 
-| Field      | Type     | Required | Description                                                   |
-| ---------- | -------- | -------- | ------------------------------------------------------------- |
-| `schedule` | `string` | Yes      | Payout frequency: `daily`, `weekly`, or `monthly`             |
-| `currency` | `string` | Yes      | ISO 4217 currency code for settlements (e.g. `USD`, `EUR`)   |
+| Field                 | Type     | Required | Description                                                                       |
+| --------------------- | -------- | -------- | --------------------------------------------------------------------------------- |
+| `schedule`            | `string` | Yes      | Payout frequency: `daily`, `weekly`, or `monthly`                                 |
+| `currency`            | `string` | Yes      | ISO 4217 currency code for settlements (e.g. `USD`, `EUR`)                       |
+| `settlementAsset`     | `string` | No       | Preferred Stellar asset: `XLM` or `CODE:ISSUER`. Omit to keep the legacy behaviour |
+| `maxSlippagePercent`  | `number` | No       | Maximum tolerated conversion slippage in percent, 0–100 (default `0.5`)          |
+
+The payout destination's `assetCode` must match the settlement asset code. A payment's source Stellar asset is read from its `metadata.assetCode` / `metadata.assetIssuer`; when the issuer is missing it is resolved from the platform's accepted Stellar assets.
 
 **Response — `200 OK`**
 
@@ -85,10 +95,10 @@ Creates or updates the calling merchant's settlement schedule. Each merchant can
 
 **Error Responses**
 
-| Status | Condition                        |
-| ------ | -------------------------------- |
-| `401`  | Missing or invalid JWT           |
-| `400`  | Invalid schedule or currency     |
+| Status | Condition                                             |
+| ------ | ----------------------------------------------------- |
+| `401`  | Missing or invalid JWT                                |
+| `400`  | Invalid schedule, currency, settlement asset or destination |
 
 ---
 
@@ -302,10 +312,13 @@ When a settlement runs (either by cron or manual trigger), the system:
 For each merchant with pending payments:
 
 1. Sums the payment amounts (gross or net, based on `SETTLEMENT_USE_GROSS_AMOUNT`).
-2. Creates a `Settlement` record with the total amount, currency, and linked payment IDs.
-3. Updates all included payments with the `settlementId` reference.
-4. Updates `lastSettledAt` on the merchant's config to the current timestamp.
-5. Sends a settlement notification email to the merchant.
+2. If a `settlementAsset` is configured, groups payments by their source Stellar asset, quotes a strict-send path for each non-matching group and sends the converted funds to the merchant's payout destination. The on-chain `destMin` enforces `maxSlippagePercent`; an excessive quote or executed slippage aborts the run and creates a `FAILED` settlement with a `failureReason`.
+3. Creates a `Settlement` record with the total amount, currency, linked payment IDs and (when applicable) the conversion rate, slippage, fee and transaction hash.
+4. Updates all included payments with the `settlementId` reference.
+5. Updates `lastSettledAt` on the merchant's config to the current timestamp.
+6. Sends settlement events/webhooks (including the conversion details) and a notification email to the merchant.
+
+A conversion that still requires multi-sig signatures leaves the settlement in `pending` state; it becomes visible as completed only after the transaction is signed and submitted.
 
 ### Refund Adjustments
 
@@ -331,6 +344,7 @@ Each cron job processes only merchants whose config matches that schedule freque
 | ------------------------------------- | ------ | ------------- | ---------- |
 | `POST /v1/settlements/config`         | Yes    | Yes           | Any (merchant configures own) |
 | `GET /v1/settlements`                 | Yes    | Yes           | Any (returns own settlements) |
+| `GET /v1/settlements/:id/statement`   | Yes    | Yes           | Any (owner or **ADMIN**)      |
 | `GET /v1/settlements/:id/adjustments` | Yes    | Yes           | Any (returns own adjustments) |
 | `GET /v1/admin/settlements`           | Yes    | Yes           | **ADMIN**  |
 | `POST /v1/admin/settlements/run`      | Yes    | Yes           | **ADMIN**  |

@@ -1,3 +1,11 @@
+jest.mock('../../tracing', () => ({
+  getTraceId: jest.fn(),
+  initializeTracing: jest.fn(),
+}));
+jest.mock('../ledger/ledger-transaction', () => ({
+  appendLedgerTransaction: jest.fn().mockResolvedValue([]),
+}));
+
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { ConfigService } from '@nestjs/config';
@@ -9,14 +17,25 @@ import {
   SettlementSchedule,
 } from './entities/merchant-settlement-config.entity';
 import { Payment, PaymentStatus } from '../payments/payment.entity';
+import { SettlementAdjustment } from './entities/settlement-adjustment.entity';
+import { PayoutDestination } from './entities/payout-destination.entity';
+import { Refund } from '../payments/refund.entity';
+import { DataSource } from 'typeorm';
 import { MailService } from '../auth/mail/mail.service';
 import { UsersService } from '../users/users.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { EventsService } from '../events/events.service';
+import { AuthService } from '../auth/auth.service';
+import { StellarService } from '../stellar/stellar.service';
+import { StellarHorizonClientService } from '../stellar/stellar-horizon-client.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 
 describe('SettlementsService', () => {
   let service: SettlementsService;
   let settlementRepo: Repository<Settlement>;
   let paymentRepo: Repository<Payment>;
   let configRepo: Repository<MerchantSettlementConfig>;
+  let managerMock: any;
 
   const merchantId = 'merchant-1';
   const config: MerchantSettlementConfig = {
@@ -24,6 +43,12 @@ describe('SettlementsService', () => {
     userId: merchantId,
     schedule: SettlementSchedule.DAILY,
     currency: 'USD',
+    settlementAsset: null,
+    maxSlippagePercent: 0.5,
+    destinationId: 'destination-1',
+    reservePercent: 0,
+    reserveDays: 0,
+    totalReservedAmount: 0,
     lastSettledAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -58,6 +83,32 @@ describe('SettlementsService', () => {
       andWhere: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue(completedPayments),
     };
+    const lockQueryBuilder = {
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(config),
+    };
+    const manager = {
+      createQueryBuilder: jest.fn((entity: unknown) =>
+        entity === MerchantSettlementConfig ? lockQueryBuilder : queryBuilder,
+      ),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((_entity: unknown, payload: unknown) => payload),
+      save: jest.fn(async (payload: any) => ({
+        id: 'settlement-1',
+        ...payload,
+      })),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    managerMock = manager;
+    const queryRunner = {
+      manager,
+      connect: jest.fn(),
+      startTransaction: jest.fn(),
+      commitTransaction: jest.fn(),
+      rollbackTransaction: jest.fn(),
+      release: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -72,6 +123,10 @@ describe('SettlementsService', () => {
             })),
             find: jest.fn(),
           },
+        },
+        {
+          provide: getRepositoryToken(SettlementAdjustment),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
         },
         {
           provide: getRepositoryToken(MerchantSettlementConfig),
@@ -89,6 +144,29 @@ describe('SettlementsService', () => {
           },
         },
         {
+          provide: getRepositoryToken(PayoutDestination),
+          useValue: {
+            findOneBy: jest.fn().mockResolvedValue({
+              id: 'destination-1',
+              assetCode: 'USD',
+              stellarAddress: 'GABC',
+              verifiedAt: new Date(),
+              coolingOffUntil: null,
+            }),
+            find: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          provide: getRepositoryToken(Refund),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            createQueryRunner: jest.fn().mockReturnValue(queryRunner),
+          },
+        },
+        {
           provide: MailService,
           useValue: {
             sendSettlementNotification: jest.fn().mockResolvedValue(undefined),
@@ -97,7 +175,12 @@ describe('SettlementsService', () => {
         {
           provide: UsersService,
           useValue: {
-            findOne: jest.fn().mockResolvedValue({ email: 'merchant@test.com', status: 'ACTIVE' }),
+            findOne: jest
+              .fn()
+              .mockResolvedValue({
+                email: 'merchant@test.com',
+                status: 'ACTIVE',
+              }),
           },
         },
         {
@@ -110,6 +193,24 @@ describe('SettlementsService', () => {
               return defaultValue;
             }),
           },
+        },
+        {
+          provide: WebhooksService,
+          useValue: { dispatchEventToMerchant: jest.fn() },
+        },
+        { provide: EventsService, useValue: { emit: jest.fn() } },
+        { provide: AuthService, useValue: { validateStepUpToken: jest.fn() } },
+        {
+          provide: StellarService,
+          useValue: {
+            validatePayoutDestination: jest.fn(),
+            convertAsset: jest.fn(),
+          },
+        },
+        { provide: AuditLogsService, useValue: { record: jest.fn() } },
+        {
+          provide: StellarHorizonClientService,
+          useValue: { getPathQuote: jest.fn() },
         },
       ],
     }).compile();
@@ -131,7 +232,8 @@ describe('SettlementsService', () => {
 
     expect(result.settlementsCreated).toBe(1);
     expect(result.totalAmount).toBe(142.5);
-    expect(settlementRepo.create).toHaveBeenCalledWith(
+    expect(managerMock.create).toHaveBeenCalledWith(
+      Settlement,
       expect.objectContaining({
         totalAmount: 142.5,
       }),
@@ -145,7 +247,8 @@ describe('SettlementsService', () => {
 
     expect(result.settlementsCreated).toBe(1);
     expect(result.totalAmount).toBe(150);
-    expect(settlementRepo.create).toHaveBeenCalledWith(
+    expect(managerMock.create).toHaveBeenCalledWith(
+      Settlement,
       expect.objectContaining({
         totalAmount: 150,
       }),
@@ -157,8 +260,13 @@ describe('SettlementsService', () => {
 
     await service.triggerManualRun();
 
-    const createQueryBuilder = paymentRepo.createQueryBuilder as jest.Mock;
-    const queryBuilder = createQueryBuilder.mock.results[0].value;
+    expect(managerMock.createQueryBuilder).toHaveBeenCalledWith(Payment, 'p');
+    const paymentCallIndex =
+      managerMock.createQueryBuilder.mock.calls.findIndex(
+        ([entity]: [unknown]) => entity === Payment,
+      );
+    const queryBuilder =
+      managerMock.createQueryBuilder.mock.results[paymentCallIndex].value;
     expect(queryBuilder.andWhere).toHaveBeenCalledWith(
       'p.merchantId = :merchantId',
       { merchantId: config.userId },
@@ -170,8 +278,14 @@ describe('SettlementsService', () => {
 
     await service.triggerManualRun();
 
-    expect(configRepo.save).toHaveBeenCalled();
-    expect(paymentRepo.update).toHaveBeenCalledWith(
+    expect(managerMock.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: merchantId,
+        lastSettledAt: expect.any(Date),
+      }),
+    );
+    expect(managerMock.update).toHaveBeenCalledWith(
+      Payment,
       { id: expect.anything() },
       { settlementId: 'settlement-1' },
     );
@@ -183,18 +297,21 @@ describe('SettlementsService', () => {
       userId: merchantId,
       schedule: SettlementSchedule.DAILY,
       currency: 'USD',
+      settlementAsset: null,
+      maxSlippagePercent: 0.5,
+      destinationId: 'destination-1',
+      reservePercent: 0,
+      reserveDays: 0,
+      totalReservedAmount: 0,
       lastSettledAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };
     const eurConfig: MerchantSettlementConfig = {
+      ...usdConfig,
       id: 'config-eur',
-      userId: merchantId,
-      schedule: SettlementSchedule.DAILY,
       currency: 'EUR',
-      lastSettledAt: null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      destinationId: 'destination-eur',
     };
 
     const usdPayments = [
@@ -223,13 +340,52 @@ describe('SettlementsService', () => {
     let currentCurrency: string | undefined;
     const queryBuilder = {
       where: jest.fn().mockReturnThis(),
-      andWhere: jest.fn().mockImplementation((_clause: string, params?: { currency?: string }) => {
-        if (params?.currency) currentCurrency = params.currency;
-        return queryBuilder;
-      }),
+      andWhere: jest
+        .fn()
+        .mockImplementation(
+          (_clause: string, params?: { currency?: string }) => {
+            if (params?.currency) currentCurrency = params.currency;
+            return queryBuilder;
+          },
+        ),
       getMany: jest
         .fn()
-        .mockImplementation(async () => (currentCurrency === 'EUR' ? eurPayments : usdPayments)),
+        .mockImplementation(async () =>
+          currentCurrency === 'EUR' ? eurPayments : usdPayments,
+        ),
+    };
+
+    let lockedId: string | undefined;
+    const lockQueryBuilder = {
+      setLock: jest.fn().mockReturnThis(),
+      where: jest
+        .fn()
+        .mockImplementation((_clause: string, params?: { id?: string }) => {
+          lockedId = params?.id;
+          return lockQueryBuilder;
+        }),
+      getOne: jest
+        .fn()
+        .mockImplementation(async () =>
+          lockedId === 'config-eur' ? eurConfig : usdConfig,
+        ),
+    };
+    const manager = {
+      createQueryBuilder: jest.fn((entity: unknown) =>
+        entity === MerchantSettlementConfig ? lockQueryBuilder : queryBuilder,
+      ),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((_entity: unknown, payload: unknown) => payload),
+      save: jest.fn(async (payload: any) => ({ id: 'settlement', ...payload })),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const queryRunner = {
+      manager,
+      connect: jest.fn(),
+      startTransaction: jest.fn(),
+      commitTransaction: jest.fn(),
+      rollbackTransaction: jest.fn(),
+      release: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -245,6 +401,10 @@ describe('SettlementsService', () => {
             })),
             find: jest.fn(),
           },
+        },
+        {
+          provide: getRepositoryToken(SettlementAdjustment),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
         },
         {
           provide: getRepositoryToken(MerchantSettlementConfig),
@@ -270,19 +430,70 @@ describe('SettlementsService', () => {
         {
           provide: UsersService,
           useValue: {
-            findOne: jest.fn().mockResolvedValue({ email: 'merchant@test.com', status: 'ACTIVE' }),
+            findOne: jest
+              .fn()
+              .mockResolvedValue({
+                email: 'merchant@test.com',
+                status: 'ACTIVE',
+              }),
           },
         },
         {
           provide: ConfigService,
           useValue: {
-            get: jest.fn((_key: string, defaultValue?: unknown) => defaultValue),
+            get: jest.fn(
+              (_key: string, defaultValue?: unknown) => defaultValue,
+            ),
           },
+        },
+        {
+          provide: getRepositoryToken(PayoutDestination),
+          useValue: {
+            findOneBy: jest
+              .fn()
+              .mockImplementation(async ({ id }: { id: string }) => ({
+                id,
+                assetCode: id === 'destination-eur' ? 'EUR' : 'USD',
+                stellarAddress: 'GABC',
+                verifiedAt: new Date(),
+                coolingOffUntil: null,
+              })),
+            find: jest.fn().mockResolvedValue([]),
+          },
+        },
+        {
+          provide: getRepositoryToken(Refund),
+          useValue: { find: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            createQueryRunner: jest.fn().mockReturnValue(queryRunner),
+          },
+        },
+        {
+          provide: WebhooksService,
+          useValue: { dispatchEventToMerchant: jest.fn() },
+        },
+        { provide: EventsService, useValue: { emit: jest.fn() } },
+        { provide: AuthService, useValue: { validateStepUpToken: jest.fn() } },
+        {
+          provide: StellarService,
+          useValue: {
+            validatePayoutDestination: jest.fn(),
+            convertAsset: jest.fn(),
+          },
+        },
+        { provide: AuditLogsService, useValue: { record: jest.fn() } },
+        {
+          provide: StellarHorizonClientService,
+          useValue: { getPathQuote: jest.fn() },
         },
       ],
     }).compile();
 
-    const multiCurrencyService = module.get<SettlementsService>(SettlementsService);
+    const multiCurrencyService =
+      module.get<SettlementsService>(SettlementsService);
 
     const result = await multiCurrencyService.triggerManualRun();
 

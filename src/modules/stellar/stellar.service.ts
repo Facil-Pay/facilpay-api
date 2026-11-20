@@ -535,6 +535,116 @@ export class StellarService {
     );
   }
 
+  /**
+   * Converts a received asset into the merchant's preferred settlement asset
+   * with a strict-send path payment. `destMin` is the on-chain slippage guard:
+   * Horizon rejects the transaction when the executed amount is worse.
+   */
+  async convertAsset(params: {
+    sourceAsset: StellarSdk.Asset;
+    destAsset: StellarSdk.Asset;
+    sourceAmount: string;
+    destMin: string;
+    path: StellarSdk.Asset[];
+    destination: string;
+    memo?: string;
+    merchantId?: string;
+  }): Promise<{
+    status?: string;
+    hash?: string;
+    ledger?: number;
+    destAmount?: string;
+    fee?: string;
+    multiSigTransactionId?: string;
+  }> {
+    const sourceAccount = await this.getServer().loadAccount(this.sourceKeypair.publicKey());
+    const baseFee = this.getBaseFee();
+    const fee = String(Math.min(this.getMaxFee(baseFee), await this.getRecommendedFee()));
+
+    const operation = StellarSdk.Operation.pathPaymentStrictSend({
+      sendAsset: params.sourceAsset,
+      sendAmount: params.sourceAmount,
+      destination: params.destination,
+      destAsset: params.destAsset,
+      destMin: params.destMin,
+      path: params.path,
+    });
+
+    let transactionBuilder = new StellarSdk.TransactionBuilder(sourceAccount, {
+      fee,
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(operation)
+      .setTimeout(30);
+
+    if (params.memo) {
+      transactionBuilder = transactionBuilder.addMemo(StellarSdk.Memo.text(params.memo));
+    }
+
+    const transaction = transactionBuilder.build();
+    transaction.sign(this.sourceKeypair);
+
+    const signers = sourceAccount.signers;
+    const medThreshold = sourceAccount.thresholds.med_threshold;
+    const mySigner = signers.find(s => s.key === this.sourceKeypair.publicKey());
+    const myWeight = mySigner ? mySigner.weight : 0;
+
+    if (medThreshold > myWeight) {
+      const multiSigTx = this.multiSigRepo.create({
+        xdr: transaction.toXDR(),
+        sourceAccount: sourceAccount.id,
+        requiredSignatures: medThreshold,
+        collectedSignatures: myWeight,
+        signers: [this.sourceKeypair.publicKey()],
+        status: MultiSigTransactionStatus.PENDING_SIGNATURES,
+      });
+      await this.multiSigRepo.save(multiSigTx);
+
+      if (params.merchantId) {
+        await this.webhooksService.dispatchEventToMerchant(
+          params.merchantId,
+          'transaction.multisig_required',
+          {
+            transactionId: multiSigTx.id,
+            requiredSignatures: medThreshold,
+            collectedSignatures: myWeight,
+          },
+        ).catch(e => this.logger.error('Failed to dispatch webhook', e));
+      }
+
+      return {
+        status: 'pending_signatures',
+        multiSigTransactionId: multiSigTx.id,
+      };
+    }
+
+    const response = await this.getServer().submitTransaction(transaction);
+    this.logger.log(`Settlement conversion submitted: ${response.hash}`);
+
+    let destAmount: string | undefined;
+    try {
+      const result = StellarSdk.xdr.TransactionResult.fromXDR(
+        response.result_xdr as string,
+        'base64',
+      ) as any;
+      const opResult = result.result()?.results?.()[0];
+      destAmount = opResult?.body?.()?.pathPaymentStrictSendResult?.()?.success?.()
+        ?.destAmount?.()?.toString();
+    } catch (error) {
+      this.logger.warn(
+        `Unable to decode converted amount from result_xdr: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return {
+      status: 'ok',
+      hash: response.hash,
+      ledger: response.ledger,
+      destAmount,
+      fee: (Number(fee) / 10_000_000).toFixed(7),
+    };
+  }
+
   async listTransactions(status?: MultiSigTransactionStatus): Promise<MultiSigTransaction[]> {
     return this.multiSigRepo.find({
       where: status ? { status } : {},

@@ -34,7 +34,7 @@ import {
   createSettlementStatementPdfDocument,
   csvEscape,
   writeSettlementStatementPdfTable,
-} from '../payments/export/payments-exporter';
+} from './settlement-statement-export';
 
 @ApiTags('settlements')
 @Controller('v1/settlements')
@@ -86,7 +86,7 @@ export class SettlementsController {
   @ApiOperation({
     summary: 'Download a settlement statement',
     description:
-      'Downloads a CSV or PDF reconciliation statement containing the settlement header, included payments, fees, refunds, and adjustments. The settlement owner or an administrator may access it.',
+      'Downloads a CSV or PDF reconciliation statement containing the settlement header, included payments, fees, refunds, adjustments and, when applicable, the Stellar asset conversion (source/settlement asset, rate, slippage, fees and transaction hash). The settlement owner or an administrator may access it.',
   })
   @ApiParam({ name: 'id', description: 'Settlement UUID' })
   @ApiQuery({ name: 'format', enum: ['pdf', 'csv'], required: true })
@@ -115,6 +115,14 @@ export class SettlementsController {
         ['period', period],
         ['currency', statement.settlement.currency],
         ['transactionHash', statement.settlement.transactionHash],
+        ['settlementAsset', statement.conversion.settlementAsset],
+        ['sourceAsset', statement.conversion.sourceAsset],
+        ['sourceAmount', statement.conversion.sourceAmount],
+        ['destAmount', statement.conversion.destAmount],
+        ['conversionRate', statement.conversion.conversionRate],
+        ['slippagePercent', statement.conversion.slippagePercent],
+        ['conversionFee', statement.conversion.conversionFee],
+        ['conversionTransactionHash', statement.conversion.conversionTransactionHash],
         [],
         ['paymentId', 'reference', 'gross', 'fee', 'net', 'refunds', 'adjustments'],
         ...statement.rows.map((row) => [
@@ -141,6 +149,7 @@ export class SettlementsController {
       currency: statement.settlement.currency,
       transactionHash: statement.settlement.transactionHash,
       settlementAmount: Number(statement.settlement.totalAmount),
+      conversion: statement.conversion,
     });
     writeSettlementStatementPdfTable(doc, statement.rows, statement.totals);
     res.setHeader('Content-Type', 'application/pdf');

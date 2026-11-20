@@ -320,3 +320,17 @@ Returns the Friendbot response payload.
 | `400`  | Invalid request or not in testnet mode            |
 | `401`  | Missing or invalid JWT                            |
 | `500`  | Failed to fund the testnet account                |
+
+---
+
+## Path Quotes and Settlement Conversion
+
+```
+GET /v1/stellar/paths?sourceAsset=XLM&destAsset=USDC:GABC...&amount=95&mode=strict-send
+```
+
+Returns the best Horizon payment path for the requested assets and amount. `sourceAsset` and `destAsset` are `XLM` or `CODE:ISSUER`; `amount` is a positive decimal with at most 7 fractional digits and `mode` is `strict-send` or `strict-receive`. The response includes the best `destAmount`, the intermediate `path`, a `slippageEstimatePercent` (difference between the best and next-best path, or `null`) and whether the result came from the short-lived quote cache.
+
+When a merchant configures a `settlementAsset` (see [SETTLEMENTS.md](SETTLEMENTS.md)), the settlements service uses this quote to convert every non-matching payment balance with a **strict-send path payment**. The minimum received amount is `quoted destAmount × (1 − maxSlippagePercent / 100)` and is enforced on-chain by Horizon. If the quote's slippage estimate exceeds the configured limit, or the executed amount is below that minimum, the settlement is marked `FAILED` with a `failureReason` and no payout is recorded.
+
+Conversions that require additional signatures are stored as pending multi-sig transactions and leave the settlement in `pending` state until the threshold is reached. The executed rate, actual slippage, Stellar network fee and conversion transaction hash are persisted on the settlement and shown on its statement.

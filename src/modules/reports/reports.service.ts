@@ -17,7 +17,7 @@ import { UpdateReportSubscriptionDto } from './dto/update-report-subscription.dt
 import { Payment, PaymentStatus } from '../payments/payment.entity';
 import { Refund } from '../payments/refund.entity';
 import { EmailNotificationService } from '../notifications/email-notification.service';
-import { csvEscape } from '../payments/export/payments-exporter';
+import { csvEscape } from '../settlements/settlement-statement-export';
 
 export interface ReportSummary {
   periodStart: Date;
