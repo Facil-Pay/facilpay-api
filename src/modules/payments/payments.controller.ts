@@ -97,7 +97,8 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Create a payment',
     description:
-      'Initiates a new payment record with PENDING status. Supports idempotency via the Idempotency-Key header to safely retry requests without creating duplicates.',
+      'Initiates a new payment record with PENDING status. Supports idempotency via the Idempotency-Key header to safely retry requests without creating duplicates. ' +
+      'When the merchant has muxed accounts enabled, the response includes a unique `depositAddress` (M... address) and its `muxedId`; payers can send there without a memo.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -125,6 +126,9 @@ export class PaymentsController {
         status: 'PENDING',
         description: 'Payment for order #12345',
         externalReference: null,
+        depositAddress:
+          'MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ',
+        muxedId: '441234567890123456',
         createdAt: '2026-01-26T10:00:00.000Z',
         updatedAt: '2026-01-26T10:00:00.000Z',
       },
@@ -482,8 +486,20 @@ export class PaymentsController {
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @ApiOkResponse({
-    description: 'Payment found.',
+    description:
+      'Payment found. Includes `depositAddress` and `muxedId` when a muxed deposit address was generated.',
     type: Payment,
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        amount: '100.50',
+        currency: 'USD',
+        status: 'PENDING',
+        depositAddress:
+          'MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ',
+        muxedId: '441234567890123456',
+      },
+    },
   })
   @ApiNotFoundResponse({
     description: 'Payment not found.',
