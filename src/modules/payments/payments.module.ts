@@ -50,6 +50,8 @@ import { RefundsController } from './refunds.controller';
 import { SettlementAdjustment } from '../settlements/entities/settlement-adjustment.entity';
 import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
+import { PaymentVerificationService } from './payment-verification.service';
+import { PaymentVerificationLog } from './entities/payment-verification-log.entity';
 
 @Module({
   imports: [
@@ -73,6 +75,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
       SettlementAdjustment,
       InvoiceReminder,
       MerchantSettings,
+      PaymentVerificationLog,
     ]),
     WebhooksModule,
     StellarModule,
@@ -109,6 +112,7 @@ import { AuditLogsModule } from '../audit-logs/audit-logs.module';
     InvoiceService,
     InvoiceReminderService,
     TestnetOnlyGuard,
+    PaymentVerificationService,
   ],
   exports: [
     PaymentsService,

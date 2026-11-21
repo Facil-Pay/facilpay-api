@@ -68,6 +68,7 @@ import { SortOrder } from '../../common/dto/pagination.dto';
 import {
   WebhookThrottle,
   BulkThrottle,
+  VerifyThrottle,
 } from '../throttler/throttler.decorator';
 import { WebhookGuard } from './webhook.guard';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
@@ -77,6 +78,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/roles';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
+import { VerifyTransactionDto } from './dto/verify-transaction.dto';
+import { PaymentVerificationService } from './payment-verification.service';
 
 @ApiTags('payments')
 @Controller('v1/payments')
@@ -88,6 +91,7 @@ export class PaymentsController {
     private readonly paymentSseService: PaymentSseService,
     private readonly merchantsService: MerchantsService,
     private readonly invoiceService: InvoiceService,
+    private readonly paymentVerificationService: PaymentVerificationService,
   ) { }
 
   @Post()
@@ -1026,5 +1030,56 @@ export class PaymentsController {
   @ApiNotFoundResponse({ description: 'Payment not found.' })
   streamEvents(@Param('id') id: string): Observable<MessageEvent> {
     return this.paymentSseService.subscribe(id);
+  }
+
+  // ── On-chain payment proof verification ───────────────────────────────────
+
+  @VerifyThrottle()
+  @Post(':id/verify-transaction')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Verify an on-chain transaction against a payment',
+    description:
+      'Fetches the transaction from Horizon and compares its destination, asset, amount ' +
+      'and memo against the stored payment record. Returns a structured result listing ' +
+      'every mismatched field. When completeOnMatch is true and all fields match, the ' +
+      'payment is completed immediately (only valid when it is still PENDING).',
+  })
+  @ApiParam({ name: 'id', description: 'Payment UUID' })
+  @ApiBearerAuth('bearer')
+  @ApiOkResponse({
+    description: 'Verification result',
+    schema: {
+      example: {
+        matched: true,
+        mismatches: [],
+        paymentCompleted: false,
+        transactionHash: 'a1b2c3...',
+        onChain: {
+          destination: 'GABCD...',
+          assetCode: 'USDC',
+          amount: '100.0000000',
+          memo: 'PAY-ref-001',
+          from: 'GXYZ...',
+          createdAt: '2026-01-26T10:00:00Z',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Transaction not found on-chain or invalid hash.' })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  async verifyTransaction(
+    @Param('id') id: string,
+    @Body() dto: VerifyTransactionDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.paymentVerificationService.verifyTransaction(
+      id,
+      dto.transactionHash,
+      dto.completeOnMatch ?? false,
+      user.id,
+    );
   }
 }
