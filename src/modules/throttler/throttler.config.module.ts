@@ -32,6 +32,11 @@ import { UsersModule } from '../users/users.module';
         ttl: 60000, // 1 minute in milliseconds
         limit: 20, // 20 requests per minute for public QR code generation
       },
+      {
+        name: 'verify',
+        ttl: 60000, // 1 minute in milliseconds
+        limit: 10, // 10 requests per minute for on-chain proof verification
+      },
     ]),
     UsersModule,
   ],
