@@ -13,9 +13,13 @@ Exports are ideal for datasets that are too large to generate synchronously (tho
 | Type | Description | Status |
 |------|-------------|--------|
 | `payments` | Export payment records with filters | ✅ Implemented |
+| `customers` | Export customer records | ✅ Implemented |
+| `invoices` | Export invoice records | ✅ Implemented |
+| `refunds` | Export refunds | ✅ Implemented |
 | `ledger` | Merchant balance ledger entries; columns are listed in [Ledger](LEDGER.md#csv-export) | ✅ Implemented |
-
-Future export types (invoices, settlements, etc.) will follow the same API pattern.
+| `quickbooks_iif` | QuickBooks journal entries in IIF format | ✅ Implemented |
+| `quickbooks_csv` | QuickBooks journal entries in CSV format | ✅ Implemented |
+| `xero_csv` | Xero manual journal entries in CSV format | ✅ Implemented |
 
 ---
 
@@ -25,6 +29,12 @@ Future export types (invoices, settlements, etc.) will follow the same API patte
 |--------|-------------|--------------|
 | `csv` | Comma-separated values | `text/csv` |
 | `pdf` | PDF document | `application/pdf` |
+| `iif` | QuickBooks interchange format | `application/x-iif` |
+
+Accounting export types select their output format automatically: `quickbooks_iif`
+uses IIF, while `quickbooks_csv` and `xero_csv` use CSV. Accounting exports
+contain completed payments, their processing fees, completed refunds, and
+completed payouts.
 
 ---
 
@@ -59,28 +69,67 @@ Authorization: Bearer <access_token>
 **Request Body:**
 ```json
 {
-  "type": "payments",
-  "format": "csv",
+  "type": "quickbooks_iif",
   "filters": {
     "from": "2026-01-01",
     "to": "2026-01-31",
-    "status": "COMPLETED",
     "currency": "USD"
   }
 }
 ```
 
-- `type` (required) — Export type. Currently only `payments` is supported.
-- `format` (required) — Output format. Either `csv` or `pdf`.
-- `filters` (optional) — Filters to apply. For `payments`, accepts the same query params as `GET /v1/payments`.
+- `type` (required) — Export type from the table above. The existing `resource`
+  field remains available as an alias for standard exports.
+- `format` (optional) — Standard exports default to `csv`; accounting exports
+  choose their format from `type` and reject incompatible format overrides.
+- `filters` (optional) — Date and currency filters supported by the selected export.
+
+Configure account mappings before creating an accounting export:
+
+```
+GET /v1/exports/account-mappings
+POST /v1/exports/account-mappings
+Authorization: ******
+```
+
+The GET response is `{ "mappings": null }` until configured. POST accepts the
+following mapping names and saves them for the authenticated merchant:
+
+```json
+{
+  "quickbooks": {
+    "payments": "Sales",
+    "fees": "Processing Fees",
+    "refunds": "Refunds",
+    "payouts": "Payouts",
+    "clearing": "Undeposited Funds"
+  },
+  "xero": {
+    "payments": "4000",
+    "fees": "6100",
+    "refunds": "4050",
+    "payouts": "1010",
+    "clearing": "1020"
+  }
+}
+```
+
+Use account names recognized by the QuickBooks company and account codes in the
+Xero chart of accounts. The mappings are applied to the generated journal
+lines; each export job uses the mappings saved when it was created.
+
+QuickBooks CSV files use journal number, date, account, debit/credit,
+description, and name columns. Xero CSV files use the manual-journal import
+columns, including account code, tax rate, amount, and currency. QuickBooks IIF
+files contain balanced `GENERAL JOURNAL` transactions.
 
 **Response (202 Accepted):**
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
   "status": "queued",
-  "type": "payments",
-  "format": "csv",
+  "type": "quickbooks_iif",
+  "format": "iif",
   "createdAt": "2026-10-17T10:00:00.000Z"
 }
 ```
@@ -91,7 +140,7 @@ The job ID is returned immediately. The file generation happens in the backgroun
 ```json
 {
   "statusCode": 400,
-  "message": "Unsupported export type: invoices",
+  "message": "Unsupported export type: settlements",
   "error": "Bad Request"
 }
 ```
@@ -356,7 +405,8 @@ See [ENVIRONMENT.md](ENVIRONMENT.md) for the complete configuration reference.
 | Status | Message | Cause |
 |--------|---------|-------|
 | 400 | `Unsupported export type: <type>` | Requested export type is not implemented |
-| 400 | `Unsupported export format: <format>` | Format must be `csv` or `pdf` |
+| 400 | `Unsupported export format: <format>` | Requested format is not supported |
+| 400 | `Configure accounting account mappings before creating this export` | No mappings have been configured |
 | 400 | `Export is not ready for download` | Status is not `completed` |
 | 401 | `Authentication required` | Missing or invalid JWT |
 | 403 | `Export belongs to another user` | Trying to access another user's export |
