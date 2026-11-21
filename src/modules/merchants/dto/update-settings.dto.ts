@@ -39,6 +39,16 @@ export class UpdateSettingsDto {
 
   @ApiPropertyOptional({
     description:
+      'Enable per-payment Stellar muxed (M-address) deposit addresses for this merchant. ' +
+      'When enabled, new payments receive a unique deposit address that matches incoming deposits without a memo.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  muxedAccountsEnabled?: boolean;
+
+  @ApiPropertyOptional({
+    description:
       'Per-currency refund approval thresholds. Refunds above the amount require a second user to approve. ' +
       'Pass null to disable. Example: { "USD": 500, "EUR": 450 }',
     example: { USD: 500, EUR: 450 },

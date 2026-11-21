@@ -46,11 +46,9 @@ COMPLETED (paid) or CANCELLED
 
 ### BEFORE Reminders
 
-Sent before the due date (default: 3 days before).
+Sent 3 days before the due date.
 
 **Email Subject**: "Reminder: Invoice due in 3 days"
-
-**Trigger**: Payment has `dueDate` set and date is 3 days before due date
 
 **Example**:
 ```
@@ -66,8 +64,6 @@ Sent on the due date.
 
 **Email Subject**: "Invoice due today"
 
-**Trigger**: Payment date matches today's date
-
 **Example**:
 ```
 Invoice Due Date: 2026-01-15
@@ -78,11 +74,9 @@ ON_DUE Reminder Sent: 2026-01-15 (on the day)
 
 ### AFTER Reminders
 
-Sent after the due date (default: 7 days after, when marked OVERDUE).
+Sent 7 days after the due date (when invoice is overdue).
 
 **Email Subject**: "Urgent: Invoice overdue by 7 days"
-
-**Trigger**: Payment marked as OVERDUE and AFTER reminder not yet sent
 
 **Example**:
 ```
@@ -92,7 +86,7 @@ AFTER Reminder Sent: 2026-01-22 (7 days after)
 
 ---
 
-## Payment Payment Object (Enhanced)
+## Invoice Payment Object (Enhanced)
 
 Payment entities now include the following fields for invoice reminders:
 
@@ -168,13 +162,20 @@ Merchants can configure reminder behavior globally:
 
 **Subject**: `Reminder: Invoice {{invoiceNumber}} due in 3 days`
 
-**Key Variables**:
-- `{{customerName}}`: Payer's name
-- `{{invoiceNumber}}`: Invoice number or payment ID
-- `{{dueDate}}`: Formatted due date
-- `{{amount}}`: Invoice amount
-- `{{currency}}`: Currency code
-- `{{merchantName}}`: Merchant's display name (from branding)
+```
+Dear {{customerName}},
+
+This is a friendly reminder that invoice {{invoiceNumber}} is due on {{dueDate}}.
+
+Amount Due: {{amount}} {{currency}}
+
+Please arrange payment by the due date to avoid late fees.
+
+[Link to payment page]
+
+Thank you,
+{{merchantName}}
+```
 
 ---
 
@@ -182,7 +183,21 @@ Merchants can configure reminder behavior globally:
 
 **Subject**: `Invoice {{invoiceNumber}} due today`
 
-**Key Variables**: Same as BEFORE reminder
+```
+Dear {{customerName}},
+
+Invoice {{invoiceNumber}} is due today.
+
+Amount Due: {{amount}} {{currency}}
+Due Date: {{dueDate}}
+
+Please complete payment immediately.
+
+[Link to payment page]
+
+Thank you,
+{{merchantName}}
+```
 
 ---
 
@@ -190,9 +205,21 @@ Merchants can configure reminder behavior globally:
 
 **Subject**: `Urgent: Invoice {{invoiceNumber}} overdue`
 
-**Key Variables**:
-- `{{daysOverdue}}`: Number of days past due
-- All variables from above templates
+```
+Dear {{customerName}},
+
+Your invoice {{invoiceNumber}} is now overdue by 7 days.
+
+Amount Due: {{amount}} {{currency}}
+Original Due Date: {{dueDate}}
+
+Immediate payment is required to avoid service suspension or additional fees.
+
+[Link to payment page]
+
+Thank you,
+{{merchantName}}
+```
 
 ---
 
@@ -282,32 +309,6 @@ Content-Type: application/json
 
 ---
 
-### GET /v1/payments/:id/reminders
-
-Retrieve all reminders sent for a payment:
-
-**Response** (200 OK):
-```json
-{
-  "paymentId": "payment-uuid",
-  "total": 2,
-  "reminders": [
-    {
-      "id": "reminder_abc123",
-      "type": "BEFORE",
-      "sentAt": "2026-01-12T08:00:00.000Z"
-    },
-    {
-      "id": "reminder_def456",
-      "type": "ON_DUE",
-      "sentAt": "2026-01-15T08:00:00.000Z"
-    }
-  ]
-}
-```
-
----
-
 ## Cron Job
 
 The system runs a daily cron job at **midnight UTC** to process reminders:
@@ -335,7 +336,7 @@ Steps:
 5. Queue ON_DUE reminder emails
 
 6. Query all invoices where:
-   - dueDate is N days from now (based on reminderOffsets)
+   - dueDate is 3 days from now
    - remindersEnabled = true
    - BEFORE reminder not yet sent
 
@@ -387,6 +388,34 @@ Content-Type: application/json
 
 ---
 
+## Reminder History
+
+### GET /v1/payments/:id/reminders
+
+Retrieve all reminders sent for a payment:
+
+**Response** (200 OK):
+```json
+{
+  "paymentId": "payment-uuid",
+  "total": 2,
+  "reminders": [
+    {
+      "id": "reminder_abc123",
+      "type": "BEFORE",
+      "sentAt": "2026-01-12T08:00:00.000Z"
+    },
+    {
+      "id": "reminder_def456",
+      "type": "ON_DUE",
+      "sentAt": "2026-01-15T08:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Examples
 
 ### Scenario 1: Enabling Reminders for an Invoice
@@ -407,48 +436,13 @@ curl -X POST https://api.facilpay.com/v1/payments \
 # Response includes status: "PENDING" and dueDate
 ```
 
----
-
 ### Scenario 2: Invoice Becomes Overdue
 
 **Timeline**:
 - 2026-01-29: BEFORE reminder sent (3 days before due date)
 - 2026-02-01: ON_DUE reminder sent
 - 2026-02-02: Midnight cron runs, invoice marked as OVERDUE
-- 2026-02-09: AFTER reminder sent (7 days after due date per config)
-
----
-
-### Scenario 3: Disable Reminders for Specific Invoice
-
-```bash
-curl -X PATCH https://api.facilpay.com/v1/payments/pay_789/reminders \
-  -H "Authorization: Bearer <jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{ "enabled": false }'
-```
-
-No further reminders will be sent for this payment.
-
----
-
-### Scenario 4: Customize Merchant Reminder Settings
-
-```bash
-curl -X PATCH https://api.facilpay.com/v1/merchants/me/settings/reminders \
-  -H "Authorization: Bearer <jwt_token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "remindersEnabled": true,
-    "reminderOffsets": [-7, -1, 0, 14]
-  }'
-```
-
-This sends reminders:
-- 7 days before due date
-- 1 day before due date
-- On the due date
-- 14 days after (if still unpaid)
+- 2026-02-02: AFTER reminder sent (7 days after original due date cron: 2026-02-08)
 
 ---
 
@@ -462,7 +456,7 @@ This sends reminders:
 
 4. **Paid Invoices**: Once a payment is marked as COMPLETED, reminders stop. If an invoice is refunded, reminders are not resumed.
 
-5. **Merchant Customization**: Merchants can customize the reminder offsets. Default is [-3, 0, 7] but can be changed to any combination.
+5. **Merchant Customization**: Merchants can customize the reminder offsets (e.g., [-7, -1, 7] for 7 days before, 1 day before, 7 days after).
 
 ---
 
@@ -473,11 +467,10 @@ The system logs:
 - Failures (delivery errors, invalid email, etc.)
 - Cron job execution (start time, invoices processed, reminders sent)
 
-Metrics available:
-- `reminder_sent_total` (counter by type: BEFORE, ON_DUE, AFTER)
+Metrics:
+- `reminder_sent_total` (counter by type)
 - `reminder_failed_total` (counter)
 - `invoices_overdue_total` (gauge)
-- `reminder_processing_duration_ms` (histogram)
 
 ---
 
@@ -487,44 +480,3 @@ Reminder-related endpoints follow standard merchant rate limits:
 - PATCH /payments/:id/reminders: 10 requests per minute
 - PATCH /merchants/me/settings/reminders: 3 requests per minute
 - GET /payments/:id/reminders: 30 requests per minute
-
----
-
-## Integration with Payment Timeline
-
-Reminder events are recorded in the payment timeline:
-
-```json
-{
-  "type": "reminder.sent",
-  "timestamp": "2026-01-12T08:00:00.000Z",
-  "data": {
-    "reminderType": "BEFORE",
-    "recipientEmail": "payer@example.com",
-    "daysUntilDue": 3
-  }
-}
-```
-
-This allows you to audit all reminders sent for a payment via the payment timeline endpoint.
-
----
-
-## Webhook Events
-
-Reminder-related events are sent via webhooks:
-
-```json
-{
-  "type": "invoice.overdue",
-  "data": {
-    "paymentId": "payment-uuid",
-    "dueDate": "2026-01-15T23:59:59.000Z",
-    "amountDue": 5000,
-    "currency": "USD",
-    "daysOverdue": 5
-  }
-}
-```
-
-Configure webhooks to receive these events. See [WEBHOOKS.md](./WEBHOOKS.md) for more information.

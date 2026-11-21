@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { Payment, PaymentStatus } from '../payments/payment.entity';
 import { StellarHorizonClientService } from './stellar-horizon-client.service';
+import { UnmatchedTransactionsService } from '../unmatched-transactions/unmatched-transactions.service';
 
 @Injectable()
 export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestroy {
@@ -31,6 +32,7 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
     private readonly horizonClientService: StellarHorizonClientService,
+    private readonly unmatchedTransactionsService: UnmatchedTransactionsService,
   ) {
     this.merchantAccountId =
       this.configService.get<string>('STELLAR_MERCHANT_ACCOUNT_ID') || '';
@@ -135,19 +137,47 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
     if (destination !== this.merchantAccountId) return;
 
     const amount: string = record.amount ?? '0';
-    let memo: string | null = null;
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum)) return;
 
-    try {
-      const tx = await record.transaction();
-      memo = tx.memo ?? null;
-    } catch {
+    // Muxed accounts are matched first: the embedded uint64 ID identifies the
+    // payment without requiring the payer to include a memo.
+    const muxedId =
+      record.to_muxed_id !== undefined && record.to_muxed_id !== null
+        ? String(record.to_muxed_id)
+        : null;
+
+    if (muxedId) {
+      const muxedPayment = await this.findPendingByMuxedId(muxedId);
+      if (muxedPayment) {
+        // The muxed ID unambiguously identifies this payment. If it is
+        // underpaid we stop here rather than resolving a different payment
+        // through the memo fallback.
+        if (this.isUnderpaid(muxedPayment, amountNum)) {
+          this.logger.warn(
+            {
+              expected: Number(muxedPayment.amount),
+              received: amountNum,
+              muxedId,
+            },
+            'Muxed account matched but amount underpaid — transaction not auto-confirmed',
+          );
+          return;
+        }
+        await this.confirmPayment(
+          muxedPayment,
+          record.transaction_hash ?? record.id,
+        );
+        return;
+      }
       this.logger.warn(
-        { hash: record.transaction_hash },
-        'Could not fetch transaction memo — matching by amount only',
+        { muxedId, hash: record.transaction_hash },
+        'Muxed ID did not match any pending payment — falling back to memo',
       );
     }
 
-    const payment = await this.findMatch(amount, memo);
+    const memo = await this.fetchMemo(record);
+    const payment = await this.findMatch(amountNum, memo);
 
     if (payment) {
       await this.confirmPayment(payment, record.transaction_hash ?? record.id);
@@ -156,20 +186,55 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
         {
           amount,
           memo,
+          muxedId,
           hash: record.transaction_hash,
           from: record.from,
         },
-        'Unmatched Stellar transaction — no pending payment found for amount+memo',
+        'Unmatched Stellar transaction — no pending payment found for muxed ID or amount+memo',
       );
+
+      // Store for manual reconciliation
+      await this.unmatchedTransactionsService.store({
+        transactionHash: record.transaction_hash ?? record.id,
+        fromAddress: record.from ?? '',
+        amount,
+        assetCode: record.asset_code ?? 'XLM',
+        memo,
+      });
     }
   }
 
+  private async fetchMemo(record: any): Promise<string | null> {
+    try {
+      const tx = await record.transaction();
+      return tx.memo ?? null;
+    } catch {
+      this.logger.warn(
+        { hash: record.transaction_hash },
+        'Could not fetch transaction memo — cannot fall back to memo matching',
+      );
+      return null;
+    }
+  }
+
+  private findPendingByMuxedId(muxedId: string): Promise<Payment | null> {
+    return this.paymentRepository.findOne({
+      where: {
+        status: PaymentStatus.PENDING,
+        muxedId,
+      },
+    });
+  }
+
+  private isUnderpaid(payment: Payment, received: number): boolean {
+    return received < Number(payment.amount) - 0.001;
+  }
+
   private async findMatch(
-    amount: string,
+    amountNum: number,
     memo: string | null,
   ): Promise<Payment | null> {
-    const amountNum = parseFloat(amount);
-    if (isNaN(amountNum) || !memo) return null;
+    if (!memo) return null;
 
     const payment = await this.paymentRepository.findOne({
       where: {
@@ -180,10 +245,9 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
 
     if (!payment) return null;
 
-    const expected = Number(payment.amount);
-    if (amountNum < expected - 0.001) {
+    if (this.isUnderpaid(payment, amountNum)) {
       this.logger.warn(
-        { expected, received: amountNum, memo },
+        { expected: Number(payment.amount), received: amountNum, memo },
         'Memo matched but amount underpaid — transaction not auto-confirmed',
       );
       return null;

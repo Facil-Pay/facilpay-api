@@ -144,4 +144,102 @@ describe('StellarHorizonStreamService', () => {
     expect(payment.overpaidAmount).toBe(1.5);
     expect(harness.paymentRepository.save).toHaveBeenCalledWith(payment);
   });
+
+  it('matches an incoming payment by muxed ID without a memo', async () => {
+    const harness = createHarness();
+    const payment = {
+      id: 'payment-muxed',
+      amount: '25.00',
+      receivedAmount: '25.00',
+      overpaidAmount: 0,
+      externalReference: null,
+      depositAddress: 'M_MUXED_ADDRESS',
+      muxedId: '1234567890',
+      status: PaymentStatus.PENDING,
+    } as unknown as Payment;
+    harness.paymentRepository.findOne.mockResolvedValue(payment);
+    const record = {
+      type: 'payment',
+      paging_token: '789',
+      to: merchantAccountId,
+      to_muxed: 'M_MUXED_ADDRESS',
+      to_muxed_id: '1234567890',
+      amount: '25.00',
+      transaction_hash: 'muxed-tx-hash',
+      transaction: jest.fn(),
+    };
+
+    await (harness.service as any).handleRecord(record);
+
+    expect(harness.paymentRepository.findOne).toHaveBeenCalledWith({
+      where: {
+        status: PaymentStatus.PENDING,
+        muxedId: '1234567890',
+      },
+    });
+    expect(record.transaction).not.toHaveBeenCalled();
+    expect(payment.status).toBe(PaymentStatus.COMPLETED);
+    expect(harness.paymentRepository.save).toHaveBeenCalledWith(payment);
+  });
+
+  it('falls back to memo matching when the muxed ID is unknown', async () => {
+    const harness = createHarness();
+    const memoPayment = {
+      id: 'payment-memo',
+      amount: '10.00',
+      receivedAmount: '10.00',
+      overpaidAmount: 0,
+      externalReference: 'memo-777',
+      status: PaymentStatus.PENDING,
+    } as unknown as Payment;
+    harness.paymentRepository.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(memoPayment);
+    const record = {
+      type: 'payment',
+      paging_token: '790',
+      to: merchantAccountId,
+      to_muxed_id: '999',
+      amount: '10.00',
+      transaction_hash: 'memo-tx-hash',
+      transaction: jest.fn().mockResolvedValue({ memo: 'memo-777' }),
+    };
+
+    await (harness.service as any).handleRecord(record);
+
+    expect(harness.paymentRepository.findOne).toHaveBeenNthCalledWith(1, {
+      where: { status: PaymentStatus.PENDING, muxedId: '999' },
+    });
+    expect(harness.paymentRepository.findOne).toHaveBeenNthCalledWith(2, {
+      where: {
+        status: PaymentStatus.PENDING,
+        externalReference: 'memo-777',
+      },
+    });
+    expect(memoPayment.status).toBe(PaymentStatus.COMPLETED);
+  });
+
+  it('does not fall back to the memo when the muxed payment is underpaid', async () => {
+    const harness = createHarness();
+    harness.paymentRepository.findOne.mockResolvedValue({
+      id: 'payment-muxed',
+      amount: '25.00',
+      muxedId: '42',
+      status: PaymentStatus.PENDING,
+    } as unknown as Payment);
+    const record = {
+      type: 'payment',
+      paging_token: '791',
+      to: merchantAccountId,
+      to_muxed_id: '42',
+      amount: '5.00',
+      transaction_hash: 'underpaid-tx',
+      transaction: jest.fn().mockResolvedValue({ memo: 'anything' }),
+    };
+
+    await (harness.service as any).handleRecord(record);
+
+    expect(record.transaction).not.toHaveBeenCalled();
+    expect(harness.paymentRepository.save).not.toHaveBeenCalled();
+  });
 });
