@@ -46,6 +46,19 @@ export class Payment {
   @Column({ nullable: true })
   externalReference: string | null;
 
+  /**
+   * Per-payment muxed (M...) deposit address derived from the merchant's base
+   * account. Null until generated or when the merchant flag is disabled.
+   */
+  @Index('IDX_payments_depositAddress')
+  @Column({ type: 'varchar', length: 69, nullable: true })
+  depositAddress: string | null = null;
+
+  /** Stringified uint64 muxed ID encoded in {@link depositAddress}. */
+  @Index('IDX_payments_muxedId')
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  muxedId: string | null = null;
+
   @Column({ nullable: true })
   description: string | null;
 
