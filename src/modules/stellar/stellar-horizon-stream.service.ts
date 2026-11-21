@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { Payment, PaymentStatus } from '../payments/payment.entity';
 import { StellarHorizonClientService } from './stellar-horizon-client.service';
+import { UnmatchedTransactionsService } from '../unmatched-transactions/unmatched-transactions.service';
 
 @Injectable()
 export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestroy {
@@ -31,6 +32,7 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
     @InjectRepository(Payment)
     private readonly paymentRepository: Repository<Payment>,
     private readonly horizonClientService: StellarHorizonClientService,
+    private readonly unmatchedTransactionsService: UnmatchedTransactionsService,
   ) {
     this.merchantAccountId =
       this.configService.get<string>('STELLAR_MERCHANT_ACCOUNT_ID') || '';
@@ -190,6 +192,15 @@ export class StellarHorizonStreamService implements OnModuleInit, OnModuleDestro
         },
         'Unmatched Stellar transaction — no pending payment found for muxed ID or amount+memo',
       );
+
+      // Store for manual reconciliation
+      await this.unmatchedTransactionsService.store({
+        transactionHash: record.transaction_hash ?? record.id,
+        fromAddress: record.from ?? '',
+        amount,
+        assetCode: record.asset_code ?? 'XLM',
+        memo,
+      });
     }
   }
 
