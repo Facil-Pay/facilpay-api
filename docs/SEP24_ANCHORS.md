@@ -253,3 +253,102 @@ The feature is backed by two tables added in migration `1792900000000-CreateAnch
 ```bash
 npm run migrate:revert
 ```
+
+---
+
+## SEP-31 Receiving (Cross-Border Payments)
+
+FacilPay can act as a receiving anchor for allowlisted SEP-10 sending anchors.
+The sending anchor registers both SEP-12 customers, then creates a pending
+merchant payment using the receiver's merchant mapping. The generated Stellar
+memo is also stored on the payment so the existing Stellar payment listener can
+match and confirm the incoming transfer.
+
+### SEP-31 Info
+
+```
+GET /v1/sep31/info
+```
+
+This public endpoint returns the configured receiving assets, fees, limits,
+funding methods, and SEP-12 customer types. Configure this URL in the
+deployment's `DIRECT_PAYMENT_SERVER` Stellar TOML field.
+
+### SEP-12 Customers
+
+Both routes require a SEP-10 bearer token from an allowlisted sending anchor.
+Configure `KYC_SERVER` in the deployment's Stellar TOML to point to
+`https://<host>/v1/sep12`.
+
+Register a sending customer:
+
+```
+PUT /v1/sep12/customer
+```
+
+```json
+{
+  "first_name": "Avery",
+  "last_name": "Example"
+}
+```
+
+Pass the customer type in the query string, e.g.
+`PUT /v1/sep12/customer?type=sep31_sender`. Register a receiving customer with
+`type=sep31_receiver` and a `merchant_id` UUID query parameter.
+`merchant_id` is a FacilPay extension used to link the SEP-12 recipient to its
+target merchant. Both registrations return a customer `id`; default required
+fields are `first_name` and `last_name`, and incomplete records remain in
+`NEEDS_INFO` status. Customer field data is encrypted before it is stored.
+
+Get a customer's status and fields using
+`GET /v1/sep12/customer?id=<customer-id>&type=sep31_sender` (or
+`sep31_receiver`). `transaction_id` can be used instead of `id` to select the
+customer associated with a SEP-31 transaction.
+
+### Create and Check a SEP-31 Transaction
+
+Both routes require a SEP-10 bearer token for an allowlisted sending anchor.
+
+```
+POST /v1/sep31/transactions
+```
+
+```json
+{
+  "amount": "25.00",
+  "asset_code": "USDC",
+  "asset_issuer": "GDRHDSTZ4PK6VI3WL224XBJFEB6CUXQESTQPXYIB3KGITRLL7XVE4NWV",
+  "sender_id": "<sender-customer-id>",
+  "receiver_id": "<receiver-customer-id>"
+}
+```
+
+The response contains the transaction `id`. Poll
+`GET /v1/sep31/transactions/<id>` for its status and Stellar destination,
+memo, and amount. FacilPay currently creates payments with at most two decimal
+places, and SEP-38 quotes, asset conversion, and transaction-specific fields
+are not supported.
+
+### SEP-31 Configuration
+
+| Environment variable | Required | Description |
+|---------------------|----------|-------------|
+| `SEP31_SENDING_ANCHOR_ACCOUNTS` | Yes | Comma-separated Stellar public keys permitted to use SEP-31/SEP-12. |
+| `SEP31_PII_ENCRYPTION_KEY` | Yes | Secret of at least 32 characters used to encrypt SEP-12 customer fields. |
+| `SEP31_RECEIVE_ASSETS` | No | Comma-separated assets: `XLM` or `CODE:ISSUER`; defaults to `XLM`. |
+| `SEP31_FUNDING_METHODS` | No | Comma-separated off-chain delivery methods in SEP-31 `/info`; defaults to `BANK_ACCOUNT`. |
+| `SEP31_REQUIRED_SENDER_FIELDS` | No | Required sender SEP-12 fields; defaults to `first_name,last_name`. |
+| `SEP31_REQUIRED_RECEIVER_FIELDS` | No | Required receiver SEP-12 fields; defaults to `first_name,last_name`. |
+| `SEP31_FEE_FIXED` | No | Fixed fee in the incoming Stellar asset. |
+| `SEP31_FEE_PERCENT` | No | Percentage fee in percentage points. |
+| `SEP31_MIN_AMOUNT` | No | Minimum supported transaction amount. |
+| `SEP31_MAX_AMOUNT` | No | Maximum supported transaction amount. |
+| `STELLAR_SOURCE_SECRET` | Yes | Secret key for the receiving Stellar account. |
+
+The reversible migration `1793200000000-CreateSep31ReceivingTables` creates the
+SEP-31 customer and transaction tables. Roll it back with:
+
+```bash
+npm run migrate:revert
+```
