@@ -36,6 +36,8 @@ import { CouponsModule } from './modules/coupons/coupons.module';
 import { ProductsModule } from './modules/products/products.module';
 import { TeamModule } from './modules/team/team.module';
 import { CustomersModule } from './modules/customers/customers.module';
+import { UnmatchedTransactionsModule } from './modules/unmatched-transactions/unmatched-transactions.module';
+import { AnchorsModule } from './modules/anchors/anchors.module';
 
 import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
 
@@ -80,6 +82,8 @@ import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
     ProductsModule,
     TeamModule,
     CustomersModule,
+    UnmatchedTransactionsModule,
+    AnchorsModule,
   ],
   controllers: [AppController],
   providers: [

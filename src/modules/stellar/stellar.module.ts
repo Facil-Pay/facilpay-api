@@ -10,9 +10,10 @@ import { StellarAsset } from './entities/stellar-asset.entity';
 import { StellarController } from './stellar.controller';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { AuthModule } from '../auth/auth.module';
+import { UnmatchedTransactionsModule } from '../unmatched-transactions/unmatched-transactions.module';
 
 @Module({
-  imports: [ConfigModule, TypeOrmModule.forFeature([Payment, MultiSigTransaction, StellarAsset]), forwardRef(() => WebhooksModule), AuthModule],
+  imports: [ConfigModule, TypeOrmModule.forFeature([Payment, MultiSigTransaction, StellarAsset]), forwardRef(() => WebhooksModule), AuthModule, UnmatchedTransactionsModule],
   controllers: [StellarController],
   providers: [StellarService, StellarHorizonStreamService, StellarHorizonClientService],
   exports: [StellarService, StellarHorizonStreamService, StellarHorizonClientService],

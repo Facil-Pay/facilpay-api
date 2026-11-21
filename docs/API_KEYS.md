@@ -2,7 +2,7 @@
 
 ## Overview
 
-API keys enable programmatic access to the FacilPay API for merchants and third-party integrations. Each API key can be scoped to specific endpoints and configured for sandbox or production environments. Keys support rotation for security purposes without service disruption.
+API keys enable programmatic access to the FacilPay API for merchants. Each API key can be scoped to specific endpoints and configured for sandbox or production environments. Keys support rotation for security purposes without service disruption.
 
 ---
 
@@ -20,8 +20,6 @@ API keys enable programmatic access to the FacilPay API for merchants and third-
     "invoices:read",
     "webhooks:read"
   ],
-  "keyPrefix": "fp_live_abc12",
-  "isActive": true,
   "lastUsedAt": "2026-01-15T14:30:00.000Z",
   "createdAt": "2026-01-10T10:30:00.000Z",
   "updatedAt": "2026-01-10T10:30:00.000Z"
@@ -35,8 +33,6 @@ API keys enable programmatic access to the FacilPay API for merchants and third-
 | `name` | String | Human-readable key name |
 | `environment` | String | Either `SANDBOX` or `PRODUCTION` |
 | `scopes` | Array | List of authorized scopes (see Scopes section) |
-| `keyPrefix` | String | First 12 characters of key for display |
-| `isActive` | Boolean | Whether the key is currently active |
 | `lastUsedAt` | Date | Timestamp of last API request using this key |
 | `createdAt` | Date | Key creation timestamp |
 | `updatedAt` | Date | Last update timestamp |
@@ -105,9 +101,7 @@ Content-Type: application/json
     "payments:write",
     "invoices:read"
   ],
-  "keyPrefix": "fp_live_abc12",
-  "plaintext": "fp_live_abc123def456xyz789abcdefghij",
-  "isActive": true,
+  "plaintext": "sk_live_abc123def456xyz789",
   "createdAt": "2026-01-15T10:30:00.000Z"
 }
 ```
@@ -122,10 +116,6 @@ List all API keys for the current merchant.
 
 **Authentication**: JWT Bearer token required
 
-**Query Parameters**:
-- `active` (boolean, optional): Filter by active status (default: all)
-- `environment` (string, optional): Filter by environment (SANDBOX or PRODUCTION)
-
 **Response** (200 OK):
 ```json
 [
@@ -139,8 +129,6 @@ List all API keys for the current merchant.
       "payments:write",
       "invoices:read"
     ],
-    "keyPrefix": "fp_live_abc12",
-    "isActive": true,
     "lastUsedAt": "2026-01-15T14:30:00.000Z",
     "createdAt": "2026-01-10T10:30:00.000Z",
     "updatedAt": "2026-01-10T10:30:00.000Z"
@@ -168,8 +156,6 @@ Retrieve details of a specific API key.
     "payments:write",
     "invoices:read"
   ],
-  "keyPrefix": "fp_live_abc12",
-  "isActive": true,
   "lastUsedAt": "2026-01-15T14:30:00.000Z",
   "createdAt": "2026-01-10T10:30:00.000Z",
   "updatedAt": "2026-01-10T10:30:00.000Z"
@@ -212,9 +198,7 @@ Authorization: Bearer <jwt_token>
     "payments:write",
     "invoices:read"
   ],
-  "keyPrefix": "fp_live_xyz78",
-  "plaintext": "fp_live_xyz789abc123def456ghijklmno",
-  "isActive": true,
+  "plaintext": "sk_live_xyz789abc123def456",
   "createdAt": "2026-01-15T15:00:00.000Z"
 }
 ```
@@ -233,46 +217,13 @@ Authorization: Bearer <jwt_token>
 
 ---
 
-### PATCH /v1/api-keys/:id
-
-Update an API key's name or scopes (except for rotation).
-
-**Authentication**: JWT Bearer token required
-
-**Request**:
-```http
-PATCH /v1/api-keys/:id HTTP/1.1
-Host: api.facilpay.com
-Authorization: Bearer <jwt_token>
-Content-Type: application/json
-
-{
-  "name": "Updated Key Name",
-  "scopes": ["payments:read", "payments:write"]
-}
-```
-
-**Response** (200 OK):
-```json
-{
-  "id": "key_abc123def456",
-  "name": "Updated Key Name",
-  "scopes": ["payments:read", "payments:write"],
-  "updatedAt": "2026-01-15T16:00:00.000Z"
-}
-```
-
----
-
 ### DELETE /v1/api-keys/:id
 
-Revoke an API key immediately.
+Revoke an API key immediately. (Future endpoint)
 
 **Authentication**: JWT Bearer token required
 
 **Response** (204 No Content)
-
-**Note**: Revoked keys cannot be reactivated. Use rotation if you need a new key with the same settings.
 
 ---
 
@@ -284,7 +235,7 @@ Include the API key in the `X-API-Key` header:
 
 ```bash
 curl https://api.facilpay.com/v1/payments \
-  -H "X-API-Key: fp_live_abc123def456xyz789abcdefghij"
+  -H "X-API-Key: sk_live_abc123def456xyz789"
 ```
 
 ### Bearer Token (Alternative)
@@ -293,7 +244,7 @@ Include the API key as a Bearer token:
 
 ```bash
 curl https://api.facilpay.com/v1/payments \
-  -H "Authorization: Bearer fp_live_abc123def456xyz789abcdefghij"
+  -H "Authorization: Bearer sk_live_abc123def456xyz789"
 ```
 
 ---
@@ -305,26 +256,23 @@ curl https://api.facilpay.com/v1/payments \
 1. **Store securely**: Never commit API keys to version control
 2. **Use environment variables**:
    ```bash
-   export FACILPAY_API_KEY="fp_live_abc123def456xyz789abcdefghij"
+   export FACILPAY_API_KEY="sk_live_abc123def456xyz789"
    ```
 3. **Rotate periodically**: Rotate keys at least annually
 4. **Rotate on compromise**: Immediately rotate if key is exposed
 5. **Principle of least privilege**: Use the minimum required scopes
-6. **Separate keys per environment**: Never use production keys in testing
 
 ### Scoping
 
 - Create separate keys for different environments (sandbox vs. production)
-- Create separate keys for different integrations or services
+- Create separate keys for different integrations
 - Restrict scopes to only what the integration needs
-- Regularly audit key usage via the `lastUsedAt` field
 
 ### Monitoring
 
 - Monitor `lastUsedAt` to identify unused keys
 - Set up alerts for failed authentication attempts
 - Review key usage patterns for anomalies
-- Implement rotation reminders for old keys
 
 ### Example: Rotating Compromised Key
 
@@ -340,33 +288,12 @@ curl https://api.facilpay.com/v1/payments \
 
 ---
 
-## Environment-Specific Behavior
-
-### Sandbox Environment
-
-- Use `environment: "SANDBOX"` when creating keys
-- Keys prefixed with `fp_test_`
-- Test against sandbox payment processors
-- No real charges occur
-
-### Production Environment
-
-- Use `environment: "PRODUCTION"` when creating keys
-- Keys prefixed with `fp_live_`
-- Process real transactions
-- Subject to rate limiting and monitoring
-
----
-
 ## Rate Limiting
 
-API key endpoints follow standard rate limits:
+API key endpoints follow standard merchant rate limits:
 - POST /api-keys: 5 per minute
 - GET /api-keys: 30 per minute
 - POST /api-keys/:id/rotate: 3 per minute
-- DELETE /api-keys/:id: 5 per minute
-
-API requests authenticated with an API key are subject to standard merchant rate limits.
 
 ---
 
@@ -392,16 +319,6 @@ API requests authenticated with an API key are subject to standard merchant rate
 }
 ```
 
-### Key Not Found
-
-```json
-{
-  "statusCode": 404,
-  "message": "API key not found",
-  "error": "Not Found"
-}
-```
-
 ### Rate Limited
 
 ```json
@@ -416,7 +333,7 @@ API requests authenticated with an API key are subject to standard merchant rate
 
 ## Webhooks
 
-When an API key is rotated, a webhook event is sent (if configured):
+When an API key is rotated, a webhook event is sent:
 
 ```json
 {
@@ -425,62 +342,8 @@ When an API key is rotated, a webhook event is sent (if configured):
   "data": {
     "apiKeyId": "key_abc123def456",
     "newKeyId": "key_xyz789abc123",
-    "rotatedAt": "2026-01-15T15:00:00.000Z",
-    "rotatedBy": "user-id"
+    "rotatedAt": "2026-01-15T15:00:00.000Z"
   },
   "createdAt": "2026-01-15T15:00:00.000Z"
 }
 ```
-
-When an API key is revoked:
-
-```json
-{
-  "id": "webhook_event_uuid",
-  "type": "api_key.revoked",
-  "data": {
-    "apiKeyId": "key_abc123def456",
-    "revokedAt": "2026-01-15T16:00:00.000Z",
-    "revokedBy": "user-id"
-  },
-  "createdAt": "2026-01-15T16:00:00.000Z"
-}
-```
-
-Configure webhooks to receive these events. See [WEBHOOKS.md](./WEBHOOKS.md) for more information.
-
----
-
-## Troubleshooting
-
-### "Invalid API key" Error
-
-- Verify the key is active (not revoked)
-- Check that the key belongs to the correct merchant
-- Ensure the key environment matches your target environment (sandbox vs. production)
-- Verify the key hasn't expired
-
-### "Insufficient scopes" Error
-
-- The API key doesn't have the required scope
-- Use the PATCH endpoint to add the necessary scope
-- Consider creating a new key with all needed scopes
-
-### "API key not found" Error
-
-- The key has been deleted or revoked
-- Verify you're using the correct key ID
-- Create a new API key if needed
-
----
-
-## Migration from Legacy Authentication
-
-If you're migrating from another authentication method:
-
-1. Create new API keys for your integration
-2. Update your application code to use the new keys
-3. Test thoroughly in sandbox environment
-4. Deploy to production
-5. Revoke the old authentication method
-6. Monitor for any issues with the new integration

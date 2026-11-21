@@ -17,7 +17,11 @@ export class PaymentQrController {
 
   @Get('payments/:id/qr')
   @QrThrottle()
-  @ApiOperation({ summary: 'Generate a QR code for a payment' })
+  @ApiOperation({
+    summary: 'Generate a QR code for a payment',
+    description:
+      'Generates a payment QR code. When the payment has a muxed deposit address, the SEP-0007 URI and the plain payment data target that M... address so payers do not need to include a memo.',
+  })
   @ApiParam({ name: 'id', description: 'Payment UUID' })
   @ApiQuery({ name: 'size', required: false, example: 300 })
   @ApiQuery({
@@ -41,16 +45,22 @@ export class PaymentQrController {
     @Res() res: Response,
   ) {
     const payment = await this.paymentsService.findOne(id);
+    // Muxed deposit addresses identify the payment on-chain, so the memo is
+    // omitted when one is present.
+    const destination = payment.depositAddress ?? payment.merchantId ?? 'anonymous';
+    const memo = payment.depositAddress
+      ? null
+      : (payment.description ?? payment.id);
     const uri =
       data === 'sep7'
         ? buildSep7Uri({
-            destination: payment.merchantId ?? 'anonymous',
+            destination,
             amount: payment.amount,
             assetCode: payment.assetCode,
             assetIssuer: payment.assetIssuer,
-            memo: payment.description ?? payment.id,
+            memo,
           })
-        : `stellar://pay?dest=${payment.merchantId ?? 'anonymous'}&amount=${payment.amount}&memo=${payment.description ?? payment.id}`;
+        : `stellar://pay?dest=${destination}&amount=${payment.amount}${memo ? `&memo=${memo}` : ''}`;
     const buffer = await QRCode.toBuffer(uri, {
       type: format === 'svg' ? 'svg' : 'png',
       width: Number(size) || 300,
