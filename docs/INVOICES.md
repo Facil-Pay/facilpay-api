@@ -2,13 +2,32 @@
 
 Merchants can issue itemized invoices before receiving payment. Invoice numbers are sequential per merchant, remain reserved after voiding, and are protected against concurrent creation.
 
+## Invoice Numbering Configuration
+
+Merchants can customize invoice numbering through merchant settings:
+
+- **`invoicePrefix`** (string, max 20 chars): Custom prefix for invoice numbers (e.g., "INV", "2024-INV"). Defaults to "INV".
+- **`invoiceNumberPadding`** (integer): Zero-padding width for invoice numbers. Defaults to 6 (e.g., "000042").
+- **`resetSequence`** (enum: `never` | `yearly`): Controls when the invoice sequence resets.
+  - `never` (default): Invoice numbers increment continuously without resetting.
+  - `yearly`: Invoice numbers reset to 1 at the start of each calendar year.
+
+**Example formatted numbers:**
+- Default: `INV-000042`
+- Custom prefix: `2024-INV-0042`
+- Yearly reset: `INV-000001` (resets each January 1st)
+
+Invoice numbers are assigned when an invoice is **finalized** (sent to the customer via `POST /v1/invoices/:id/send`), not when the draft is created. This ensures that draft invoices do not consume numbers in the sequence.
+
+The sequence is protected by PostgreSQL advisory locks per merchant (and per year for yearly resets) to prevent gaps or duplicates under concurrent invoice creation.
+
 ## Endpoints
 
 - `POST /v1/invoices` creates a `DRAFT` invoice with customer email/name, currency, due date, line items, and an optional tax rate.
 - `GET /v1/invoices` and `GET /v1/invoices/:id` list or retrieve merchant-owned invoices.
 - `PATCH /v1/invoices/:id` edits a draft only.
 - `DELETE /v1/invoices/:id` voids a draft without reusing its number.
-- `POST /v1/invoices/:id/send` opens the invoice and emails its public pay link.
+- `POST /v1/invoices/:id/send` opens the invoice and emails its public pay link. **This is when the final invoice number is assigned.**
 - `POST /v1/invoices/:id/void` voids an open or overdue invoice.
 - `GET /v1/invoices/:id/pdf` streams the itemized PDF.
 - `GET /v1/public/invoices/:token` returns the public invoice details.

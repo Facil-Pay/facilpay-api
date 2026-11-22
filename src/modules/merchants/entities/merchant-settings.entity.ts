@@ -45,6 +45,22 @@ export class MerchantSettings {
   @Column({ type: 'jsonb', nullable: true })
   refundApprovalThresholds: Record<string, number> | null = null;
 
+  /** Invoice number prefix, e.g. "INV" or "2024-INV" */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  invoicePrefix: string | null = null;
+
+  /** Zero-padding for invoice numbers (e.g. 6 → "000001") */
+  @Column({ type: 'int', default: 6 })
+  invoiceNumberPadding: number = 6;
+
+  /** When to reset the invoice sequence */
+  @Column({
+    type: 'varchar',
+    length: 10,
+    default: 'never',
+  })
+  resetSequence: 'never' | 'yearly' = 'never';
+
   @CreateDateColumn()
   createdAt: Date;
 

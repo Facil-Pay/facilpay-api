@@ -13,11 +13,13 @@ import { randomBytes } from 'crypto';
 import type { Response } from 'express';
 import { Invoice, InvoiceStatus } from './invoice.entity';
 import { InvoiceLineItem } from './invoice-line-item.entity';
+import { InvoiceSequence } from './entities/invoice-sequence.entity';
 import { CreateInvoiceDto, UpdateInvoiceDto } from './dto/invoice.dto';
 import { ProductsService } from '../products/products.service';
 import { EmailNotificationService } from '../notifications/email-notification.service';
 import { PaymentsService } from '../payments/payments.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
+import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
 import { serializeInvoice } from '../webhooks/payload-serializers/invoice.serializer';
 import { generateStandaloneInvoicePdf } from '../payments/export/invoice.generator';
 
@@ -28,6 +30,10 @@ export class InvoicesService {
   constructor(
     @InjectRepository(Invoice)
     private readonly invoiceRepository: Repository<Invoice>,
+    @InjectRepository(InvoiceSequence)
+    private readonly sequenceRepository: Repository<InvoiceSequence>,
+    @InjectRepository(MerchantSettings)
+    private readonly merchantSettingsRepository: Repository<MerchantSettings>,
     private readonly dataSource: DataSource,
     private readonly productsService: ProductsService,
     private readonly emailNotificationService: EmailNotificationService,
@@ -41,7 +47,9 @@ export class InvoicesService {
     await runner.connect();
     await runner.startTransaction();
     try {
+      // Lock for the merchant to ensure number sequence consistency
       await runner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [merchantId]);
+      
       const result = await runner.query(
         'SELECT COALESCE(MAX("number"), 0) + 1 AS "nextNumber" FROM "invoices" WHERE "merchantId" = $1',
         [merchantId],
@@ -128,11 +136,16 @@ export class InvoicesService {
     const invoice = await this.findOne(merchantId, id);
     this.assertDraft(invoice);
     if (!invoice.customerEmail) throw new BadRequestException('Invoice customer email is required');
+    
+    // Assign final number when invoice is finalized (sent)
+    await this.assignFinalInvoiceNumber(merchantId, invoice);
+    
     invoice.status = InvoiceStatus.OPEN;
     await this.invoiceRepository.save(invoice);
     const baseUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
+    const invoiceNumber = await this.formatInvoiceNumber(merchantId, invoice.number);
     await this.emailNotificationService.sendInvoiceCreated(invoice.customerEmail, {
-      invoiceNumber: this.formatNumber(invoice.number),
+      invoiceNumber,
       customerName: invoice.customerName,
       amount: invoice.total,
       currency: invoice.currency,
@@ -209,7 +222,7 @@ export class InvoicesService {
 
   async streamPdf(merchantId: string, id: string, response: Response): Promise<void> {
     const invoice = await this.findOne(merchantId, id);
-    const invoiceNumber = this.formatNumber(invoice.number);
+    const invoiceNumber = await this.formatInvoiceNumber(merchantId, invoice.number);
     const document = generateStandaloneInvoicePdf({ invoice });
     response.setHeader('Content-Type', 'application/pdf');
     response.setHeader(
@@ -369,5 +382,68 @@ export class InvoicesService {
 
   private formatNumber(number: number): string {
     return `INV-${String(number).padStart(6, '0')}`;
+  }
+
+  /**
+   * Assign the final invoice number based on merchant's sequencing settings.
+   * This should be called when the invoice is finalized (sent).
+   */
+  private async assignFinalInvoiceNumber(merchantId: string, invoice: Invoice): Promise<void> {
+    const settings = await this.merchantSettingsRepository.findOne({
+      where: { merchantId },
+    });
+
+    const resetSequence = settings?.resetSequence ?? 'never';
+    const year = resetSequence === 'yearly' ? new Date().getFullYear() : null;
+
+    const runner = this.dataSource.createQueryRunner();
+    await runner.connect();
+    await runner.startTransaction();
+    
+    try {
+      // Lock sequence row for this merchant and year combination
+      const lockKey = year ? `${merchantId}-${year}` : merchantId;
+      await runner.query('SELECT pg_advisory_xact_lock(hashtext($1))', [lockKey]);
+
+      let sequence = await runner.manager.findOne(InvoiceSequence, {
+        where: { merchantId, year },
+      });
+
+      if (!sequence) {
+        sequence = runner.manager.create(InvoiceSequence, {
+          merchantId,
+          year,
+          lastNumber: 0,
+        });
+      }
+
+      sequence.lastNumber += 1;
+      await runner.manager.save(sequence);
+
+      invoice.number = sequence.lastNumber;
+      await runner.manager.save(invoice);
+
+      await runner.commitTransaction();
+    } catch (error) {
+      await runner.rollbackTransaction();
+      throw error;
+    } finally {
+      await runner.release();
+    }
+  }
+
+  /**
+   * Format the invoice number with prefix and padding according to merchant settings.
+   */
+  private async formatInvoiceNumber(merchantId: string, number: number): Promise<string> {
+    const settings = await this.merchantSettingsRepository.findOne({
+      where: { merchantId },
+    });
+
+    const prefix = settings?.invoicePrefix ?? 'INV';
+    const padding = settings?.invoiceNumberPadding ?? 6;
+    const paddedNumber = String(number).padStart(padding, '0');
+
+    return `${prefix}-${paddedNumber}`;
   }
 }

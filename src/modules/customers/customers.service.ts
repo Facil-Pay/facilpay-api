@@ -13,10 +13,18 @@ import {
   Repository,
 } from 'typeorm';
 import { Customer } from './customer.entity';
+import { CustomerNote } from './entities/customer-note.entity';
+import { CustomerWallet } from './entities/customer-wallet.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { GetCustomersDto } from './dto/get-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { MergeCustomerResult } from './dto/merge-customer.dto';
+import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
+import {
+  GetCustomerTimelineDto,
+  CustomerTimelineResponse,
+  TimelineEvent,
+} from './dto/customer-timeline.dto';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { Payment } from '../payments/payment.entity';
@@ -29,6 +37,10 @@ export class CustomersService {
   constructor(
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
+    @InjectRepository(CustomerNote)
+    private readonly customerNoteRepository: Repository<CustomerNote>,
+    @InjectRepository(CustomerWallet)
+    private readonly customerWalletRepository: Repository<CustomerWallet>,
     private readonly dataSource: DataSource,
     private readonly auditLogsService: AuditLogsService,
   ) {}
@@ -267,5 +279,261 @@ export class CustomersService {
     } catch {
       // Webhook delivery failures must not break the customer operation.
     }
+  }
+
+  /**
+   * Add a note to a customer's record (internal only, never exposed to customer portal).
+   */
+  async createNote(
+    customerId: string,
+    merchantId: string,
+    dto: CreateCustomerNoteDto,
+    author: { id: string; name?: string },
+  ): Promise<CustomerNote> {
+    const customer = await this.findOne(customerId, merchantId);
+
+    const note = this.customerNoteRepository.create({
+      customerId: customer.id,
+      content: dto.content.trim(),
+      authorId: author.id,
+      authorName: author.name ?? null,
+    });
+
+    return this.customerNoteRepository.save(note);
+  }
+
+  /**
+   * Get all notes for a customer, ordered newest first.
+   */
+  async getNotes(customerId: string, merchantId: string): Promise<CustomerNote[]> {
+    await this.findOne(customerId, merchantId);
+
+    return this.customerNoteRepository.find({
+      where: { customerId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Add or update a Stellar wallet address for the customer.
+   * Duplicate addresses are not stored twice.
+   */
+  async addWallet(
+    customerId: string,
+    merchantId: string,
+    address: string,
+  ): Promise<CustomerWallet> {
+    const customer = await this.findOne(customerId, merchantId);
+
+    let wallet = await this.customerWalletRepository.findOne({
+      where: { customerId: customer.id, address },
+    });
+
+    if (wallet) {
+      wallet.lastUsedAt = new Date();
+      return this.customerWalletRepository.save(wallet);
+    }
+
+    wallet = this.customerWalletRepository.create({
+      customerId: customer.id,
+      address,
+      lastUsedAt: new Date(),
+    });
+
+    return this.customerWalletRepository.save(wallet);
+  }
+
+  /**
+   * Get all wallet addresses for a customer.
+   */
+  async getWallets(customerId: string, merchantId: string): Promise<CustomerWallet[]> {
+    await this.findOne(customerId, merchantId);
+
+    return this.customerWalletRepository.find({
+      where: { customerId },
+      order: { lastUsedAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Delete a wallet address.
+   */
+  async deleteWallet(
+    walletId: string,
+    customerId: string,
+    merchantId: string,
+  ): Promise<void> {
+    await this.findOne(customerId, merchantId);
+
+    const wallet = await this.customerWalletRepository.findOne({
+      where: { id: walletId, customerId },
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('Wallet not found');
+    }
+
+    await this.customerWalletRepository.remove(wallet);
+  }
+
+  /**
+   * Get the most recently used wallet for refunds.
+   */
+  async getMostRecentWallet(
+    customerId: string,
+    merchantId: string,
+  ): Promise<CustomerWallet | null> {
+    await this.findOne(customerId, merchantId);
+
+    return this.customerWalletRepository.findOne({
+      where: { customerId },
+      order: { lastUsedAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Get a merged timeline of payments, invoices, refunds, disputes, and notes.
+   * Ordered newest first with cursor-based pagination.
+   */
+  async getTimeline(
+    customerId: string,
+    merchantId: string,
+    dto: GetCustomerTimelineDto,
+  ): Promise<CustomerTimelineResponse> {
+    const customer = await this.findOne(customerId, merchantId);
+    const limit = Math.min(dto.limit ?? 20, 100);
+
+    // Parse cursor if provided
+    let cursorTimestamp: Date | null = null;
+    let cursorId: string | null = null;
+    if (dto.cursor) {
+      const [timestamp, id] = dto.cursor.split('_');
+      cursorTimestamp = new Date(timestamp);
+      cursorId = id;
+    }
+
+    // Build the query for each resource type
+    const events: TimelineEvent[] = [];
+
+    // Payments
+    const paymentsQuery = this.dataSource
+      .getRepository(Payment)
+      .createQueryBuilder('payment')
+      .where('payment.customerId = :customerId', { customerId: customer.id })
+      .andWhere('payment.merchantId = :merchantId', { merchantId });
+
+    if (cursorTimestamp && cursorId) {
+      paymentsQuery.andWhere(
+        '(payment.createdAt < :cursor OR (payment.createdAt = :cursor AND payment.id < :cursorId))',
+        { cursor: cursorTimestamp, cursorId },
+      );
+    }
+
+    const payments = await paymentsQuery
+      .orderBy('payment.createdAt', 'DESC')
+      .addOrderBy('payment.id', 'DESC')
+      .limit(limit)
+      .getMany();
+
+    events.push(
+      ...payments.map((p) => ({
+        id: p.id,
+        type: 'payment' as const,
+        timestamp: p.createdAt,
+        data: {
+          amount: p.amount,
+          currency: p.currency,
+          status: p.status,
+          payerEmail: p.payerEmail,
+        },
+      })),
+    );
+
+    // Invoices
+    const invoicesQuery = this.dataSource
+      .getRepository(Invoice)
+      .createQueryBuilder('invoice')
+      .where('LOWER(invoice.customerEmail) = LOWER(:email)', { email: customer.email })
+      .andWhere('invoice.merchantId = :merchantId', { merchantId });
+
+    if (cursorTimestamp && cursorId) {
+      invoicesQuery.andWhere(
+        '(invoice.createdAt < :cursor OR (invoice.createdAt = :cursor AND invoice.id < :cursorId))',
+        { cursor: cursorTimestamp, cursorId },
+      );
+    }
+
+    const invoices = await invoicesQuery
+      .orderBy('invoice.createdAt', 'DESC')
+      .addOrderBy('invoice.id', 'DESC')
+      .limit(limit)
+      .getMany();
+
+    events.push(
+      ...invoices.map((i) => ({
+        id: i.id,
+        type: 'invoice' as const,
+        timestamp: i.createdAt,
+        data: {
+          number: i.number,
+          total: i.total,
+          currency: i.currency,
+          status: i.status,
+          dueDate: i.dueDate,
+        },
+      })),
+    );
+
+    // Notes
+    const notesQuery = this.customerNoteRepository
+      .createQueryBuilder('note')
+      .where('note.customerId = :customerId', { customerId: customer.id });
+
+    if (cursorTimestamp && cursorId) {
+      notesQuery.andWhere(
+        '(note.createdAt < :cursor OR (note.createdAt = :cursor AND note.id < :cursorId))',
+        { cursor: cursorTimestamp, cursorId },
+      );
+    }
+
+    const notes = await notesQuery
+      .orderBy('note.createdAt', 'DESC')
+      .addOrderBy('note.id', 'DESC')
+      .limit(limit)
+      .getMany();
+
+    events.push(
+      ...notes.map((n) => ({
+        id: n.id,
+        type: 'note' as const,
+        timestamp: n.createdAt,
+        data: {
+          content: n.content,
+          authorName: n.authorName,
+        },
+      })),
+    );
+
+    // Sort all events by timestamp DESC, then by id DESC
+    events.sort((a, b) => {
+      const timeDiff = b.timestamp.getTime() - a.timestamp.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return b.id.localeCompare(a.id);
+    });
+
+    // Take only the requested limit
+    const paginatedEvents = events.slice(0, limit);
+
+    // Build next cursor
+    let nextCursor: string | null = null;
+    if (paginatedEvents.length === limit) {
+      const last = paginatedEvents[paginatedEvents.length - 1];
+      nextCursor = `${last.timestamp.toISOString()}_${last.id}`;
+    }
+
+    return {
+      data: paginatedEvents,
+      nextCursor,
+    };
   }
 }

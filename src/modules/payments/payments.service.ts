@@ -60,6 +60,7 @@ import { UsersService } from '../users/users.service';
 import { SettlementAdjustment } from '../settlements/entities/settlement-adjustment.entity';
 import { EventsService } from '../events/events.service';
 import { Customer } from '../customers/customer.entity';
+import { CustomersService } from '../customers/customers.service';
 import { resolveCustomerForMerchant } from '../customers/customer-ownership';
 
 const DEFAULT_PAYMENT_EXPIRY_SECONDS = 1800;
@@ -95,6 +96,7 @@ export class PaymentsService {
     private readonly paymentLinksService: PaymentLinksService,
     private readonly eventsService: EventsService,
     private readonly auditLogsService: AuditLogsService,
+    private readonly customersService: CustomersService,
   ) {
     this.logger = appLogger.child({ module: PaymentsService.name });
   }
@@ -2549,6 +2551,38 @@ export class PaymentsService {
 
     if (result.affected && result.affected > 0) {
       this.logger.info(`Expired ${result.affected} pending refund approval(s)`);
+    }
+  }
+
+  /**
+   * Save payer's Stellar wallet address to the customer record for faster refunds.
+   * Called when a payment is completed and we have the payer's blockchain address.
+   */
+  async savePayerWalletAddress(paymentId: string, payerAddress: string): Promise<void> {
+    try {
+      const payment = await this.paymentRepository.findOne({
+        where: { id: paymentId },
+      });
+
+      if (!payment || !payment.customerId || !payment.merchantId) {
+        return;
+      }
+
+      await this.customersService.addWallet(
+        payment.customerId,
+        payment.merchantId,
+        payerAddress,
+      );
+
+      this.logger.info(
+        `Saved wallet address for payment ${paymentId}, customer ${payment.customerId}`,
+      );
+    } catch (error) {
+      // Don't fail payment processing if wallet storage fails
+      this.logger.error(
+        {err: error},
+        `Failed to save wallet address for payment ${paymentId}`,
+      );
     }
   }
 }

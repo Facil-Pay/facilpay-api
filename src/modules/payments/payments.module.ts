@@ -25,6 +25,7 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
 import { StellarModule } from '../stellar/stellar.module';
 import { MerchantsModule } from '../merchants/merchants.module';
 import { UsersModule } from '../users/users.module';
+import { CustomersModule } from '../customers/customers.module';
 import { PaymentQrController } from './payment-qr.controller';
 import { MerchantFeeConfig } from './merchant-fee-config.entity';
 import { MerchantLimit } from '../merchants/entities/merchant-limit.entity';
@@ -81,6 +82,7 @@ import { PaymentVerificationLog } from './entities/payment-verification-log.enti
     StellarModule,
     MerchantsModule,
     UsersModule,
+    CustomersModule,
     PaymentLinksModule,
     CouponsModule,
     NotificationsModule,

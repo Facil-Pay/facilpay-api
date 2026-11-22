@@ -7,6 +7,8 @@ import { ProductsModule } from '../products/products.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { Invoice } from './invoice.entity';
 import { InvoiceLineItem } from './invoice-line-item.entity';
+import { InvoiceSequence } from './entities/invoice-sequence.entity';
+import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
 import { InvoicesController } from './invoices.controller';
 import { PublicInvoicesController } from './public-invoices.controller';
 import { InvoicesService } from './invoices.service';
@@ -14,7 +16,7 @@ import { InvoicesService } from './invoices.service';
 @Module({
   imports: [
     ConfigModule,
-    TypeOrmModule.forFeature([Invoice, InvoiceLineItem]),
+    TypeOrmModule.forFeature([Invoice, InvoiceLineItem, InvoiceSequence, MerchantSettings]),
     NotificationsModule,
     PaymentsModule,
     ProductsModule,
