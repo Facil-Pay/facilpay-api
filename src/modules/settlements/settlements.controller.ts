@@ -55,6 +55,13 @@ export class SettlementsController {
     return this.service.upsertConfig(req.user.id, dto);
   }
 
+  @Get('preview')
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'Estimate the next settlement, fees, refunds and reserve per currency' })
+  preview(@Request() req: any) {
+    return this.service.preview(req.user.id);
+  }
+
   @Get()
   @ApiBearerAuth('bearer')
   @ApiOperation({

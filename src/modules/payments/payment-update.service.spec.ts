@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AuditLog } from '../audit-logs/audit-log.entity';
 import { PaymentsService } from './payments.service';
 import { Payment, PaymentStatus } from './payment.entity';
+import { PaymentNote } from './payment-note.entity';
 
 const merchantId = 'merchant-1';
 const paymentId = 'payment-1';
@@ -49,6 +50,18 @@ function createHarness() {
   const disputeRepository = {
     find: jest.fn().mockResolvedValue([]),
   };
+  const paymentNoteRepository = {
+    create: jest.fn((data) => ({
+      id: 'note-1',
+      createdAt: new Date('2026-09-25T10:02:00.000Z'),
+      ...data,
+    })),
+    save: jest.fn((note) => Promise.resolve(note)),
+    find: jest.fn().mockResolvedValue([]),
+  };
+  dataSource.getRepository.mockImplementation((entity) =>
+    entity === PaymentNote ? paymentNoteRepository : undefined,
+  );
   const paymentSseService = {
     emit: jest.fn(),
   };
@@ -88,6 +101,7 @@ function createHarness() {
     queryRunner,
     dataSource,
     paymentRepository,
+    paymentNoteRepository,
     paymentSseService,
     webhooksService,
   };
@@ -239,9 +253,18 @@ describe('PaymentsService.getTimeline payment.updated projection', () => {
     const auditRepository = {
       find: jest.fn().mockResolvedValue([auditLog]),
     };
-    harness.dataSource.getRepository.mockReturnValue(auditRepository);
+    const note = {
+      id: 'note-1',
+      authorId: merchantId,
+      body: 'Followed up with customer',
+      createdAt: new Date('2026-09-25T10:02:00.000Z'),
+    } as PaymentNote;
+    harness.paymentNoteRepository.find.mockResolvedValue([note]);
+    harness.dataSource.getRepository.mockImplementation((entity) =>
+      entity === AuditLog ? auditRepository : harness.paymentNoteRepository,
+    );
 
-    const timeline = await harness.service.getTimeline(paymentId);
+    const timeline = await harness.service.getTimeline(paymentId, merchantId);
 
     expect(auditRepository.find).toHaveBeenCalledWith({
       where: {
@@ -262,6 +285,15 @@ describe('PaymentsService.getTimeline payment.updated projection', () => {
             changedFields: ['description'],
           },
         }),
+        expect.objectContaining({
+          type: 'payment.note_added',
+          timestamp: note.createdAt,
+          data: {
+            noteId: note.id,
+            authorId: note.authorId,
+            body: note.body,
+          },
+        }),
       ]),
     );
     expect(timeline).not.toEqual(
@@ -269,5 +301,44 @@ describe('PaymentsService.getTimeline payment.updated projection', () => {
         expect.objectContaining({ type: 'payment.status_updated' }),
       ]),
     );
+  });
+});
+
+describe('PaymentsService payment notes', () => {
+  it('creates and lists notes only after verifying payment ownership', async () => {
+    const harness = createHarness();
+
+    const created = await harness.service.addPaymentNote(
+      paymentId,
+      merchantId,
+      'Internal support context',
+    );
+    const notes = await harness.service.getPaymentNotes(paymentId, merchantId);
+
+    expect(harness.paymentRepository.findOneBy).toHaveBeenCalledWith({
+      id: paymentId,
+      merchantId,
+    });
+    expect(harness.paymentNoteRepository.create).toHaveBeenCalledWith({
+      paymentId,
+      authorId: merchantId,
+      body: 'Internal support context',
+    });
+    expect(created).toMatchObject({ paymentId, authorId: merchantId });
+    expect(notes).toEqual([]);
+  });
+
+  it('does not allow a different merchant to add or read notes', async () => {
+    const harness = createHarness();
+    harness.paymentRepository.findOneBy.mockResolvedValue(null);
+
+    await expect(
+      harness.service.addPaymentNote(paymentId, 'other-merchant', 'Private'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      harness.service.getPaymentNotes(paymentId, 'other-merchant'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(harness.paymentNoteRepository.save).not.toHaveBeenCalled();
+    expect(harness.paymentNoteRepository.find).not.toHaveBeenCalled();
   });
 });

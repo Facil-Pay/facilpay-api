@@ -27,6 +27,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { PaymentsService } from './payments.service';
 import { RejectRefundDto } from './dto/reject-refund.dto';
+import { GetRefundsDto } from './dto/get-refunds.dto';
 
 @ApiTags('refunds')
 @ApiBearerAuth('bearer')
@@ -34,6 +35,17 @@ import { RejectRefundDto } from './dto/reject-refund.dto';
 @Controller('v1/refunds')
 export class RefundsController {
   constructor(private readonly paymentsService: PaymentsService) {}
+
+  @Get()
+  @ApiOperation({
+    summary: 'List refunds for the authenticated merchant',
+    description:
+      'Returns a paginated list of refunds belonging to the authenticated merchant, with optional filters.',
+  })
+  @ApiOkResponse({ description: 'Paginated list of merchant refunds.' })
+  list(@Query() query: GetRefundsDto, @Request() req: any) {
+    return this.paymentsService.listRefunds(req.user.id, query);
+  }
 
   @Get('report')
   @ApiOperation({

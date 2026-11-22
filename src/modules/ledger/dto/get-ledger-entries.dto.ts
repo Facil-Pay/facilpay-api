@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsEnum,
+  IsIn,
   IsInt,
   IsISO8601,
   IsOptional,
@@ -53,4 +54,14 @@ export class GetLedgerEntriesDto {
   @IsOptional()
   @ApiPropertyOptional({ example: '2026-12-31T23:59:59.999Z' })
   to?: string;
+
+  @IsIn(['json', 'csv'])
+  @IsOptional()
+  @ApiPropertyOptional({
+    enum: ['json', 'csv'],
+    default: 'json',
+    description:
+      'Response format. `csv` returns the entries oldest first as a file and requires both `from` and `to`; `page` and `limit` are ignored.',
+  })
+  format?: 'json' | 'csv';
 }

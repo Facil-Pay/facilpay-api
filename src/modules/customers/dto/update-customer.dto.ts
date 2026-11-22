@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEmail,
   IsNotEmpty,
   IsObject,
@@ -53,4 +55,18 @@ export class UpdateCustomerDto {
     nullable: true,
   })
   metadata?: Record<string, unknown> | null;
+
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  @IsOptional()
+  @ApiPropertyOptional({
+    description:
+      'Replacement set of tags, stored trimmed and lowercased with duplicates removed. Send [] to clear them.',
+    example: ['vip', 'wholesale'],
+    type: [String],
+    maxItems: 20,
+  })
+  tags?: string[];
 }

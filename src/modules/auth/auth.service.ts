@@ -50,6 +50,8 @@ import { SessionsService } from '../sessions/sessions.service';
 import { PasswordHistoryService } from './password-history.service';
 import { WebAuthnService } from './webauthn.service';
 import { GeoLookupService } from '../merchants/geo-lookup.service';
+import { MagicLinkToken } from './entities/magic-link-token.entity';
+import { LoginHistoryService } from './login-history.service';
 import { LoginAlertsService } from './login-alerts.service';
 
 export interface SessionMetadata {
@@ -91,6 +93,78 @@ export class AuthService {
     this.logger = appLogger.child({ module: AuthService.name });
     this.maxFailedAttempts = this.configService.get<number>('LOGIN_MAX_ATTEMPTS', 5);
     this.lockDurationMinutes = this.configService.get<number>('LOGIN_LOCK_DURATION_MINUTES', 15);
+  }
+
+  async requestMagicLink(email: string, ipAddress?: string): Promise<{ message: string }> {
+    email = email.trim().toLowerCase();
+    // Shared database counters apply independently to email and IP across workers.
+    await this.dataSource.transaction(async manager => {
+      for (const identity of ['email:' + email, 'ip:' + (ipAddress ?? 'unknown')]) {
+        const key = createHash('sha256').update(identity).digest('hex');
+        const rows = await manager.query(`
+          INSERT INTO magic_link_rate_limits (key, count, "expiresAt")
+          VALUES ($1, 1, NOW() + INTERVAL '15 minutes')
+          ON CONFLICT (key) DO UPDATE SET
+            count = CASE WHEN magic_link_rate_limits."expiresAt" <= NOW() THEN 1 ELSE magic_link_rate_limits.count + 1 END,
+            "expiresAt" = CASE WHEN magic_link_rate_limits."expiresAt" <= NOW() THEN NOW() + INTERVAL '15 minutes' ELSE magic_link_rate_limits."expiresAt" END
+          RETURNING count`, [key]);
+        if (Number(rows[0].count) > 5) throw new HttpException('Too many requests', HttpStatus.TOO_MANY_REQUESTS);
+      }
+    });
+    const response = { message: 'If an eligible account with that email exists, a sign-in link has been sent.' };
+    const user = await this.usersService.findByEmail(email);
+    if (!user || !user.isActive || user.deletedAt || !user.isEmailVerified || user.passwordResetRequired || this.usersService.isAccountLocked(user)) return response;
+    const token = await this.jwtService.signAsync({ sub: user.id, purpose: 'magic-link', jti: randomUUID() }, { expiresIn: '15m' });
+    await this.dataSource.getRepository(MagicLinkToken).save({
+      userId: user.id, tokenHash: createHash('sha256').update(token).digest('hex'),
+      expiresAt: new Date(Date.now() + 15 * 60000), used: false,
+    });
+    try {
+      await this.mailService.sendMagicLinkEmail(user.email, token);
+    } catch {
+      this.logger.warn({ userId: user.id }, 'Could not send magic-link email');
+    }
+    return response;
+  }
+
+  async verifyMagicLink(token: string, ipAddress?: string, userAgent?: string, deviceId?: string, twoFactorCode?: string) {
+    let payload: { sub: string; purpose: string };
+    try {
+      payload = await this.jwtService.verifyAsync(token);
+      if (!['magic-link', 'two-factor-login'].includes(payload.purpose) || typeof payload.sub !== 'string') throw new Error();
+    } catch {
+      throw new UnauthorizedException('Invalid or expired sign-in link');
+    }
+    const user = await this.usersService.findByIdWithSecrets(payload.sub).catch(() => null);
+    if (!user || !user.isActive || user.deletedAt || !user.isEmailVerified || user.passwordResetRequired || this.usersService.isAccountLocked(user)) {
+      throw new UnauthorizedException('Invalid or expired sign-in link');
+    }
+    await this.assertPasswordLoginAllowed(user.id);
+    if (payload.purpose === 'two-factor-login') {
+      if (!twoFactorCode || !user.twoFactorEnabled || !user.twoFactorSecret) throw new UnauthorizedException('Invalid two-factor code');
+      const valid = twoFactorCode.length === 6 && verifySync({ token: twoFactorCode, secret: this.decryptTwoFactorSecret(user.twoFactorSecret) }).valid;
+      if (!valid && !await this.usersService.consumeBackupCode(user.id, twoFactorCode)) {
+        await this.usersService.incrementFailedLoginAttempts(user.id, this.maxFailedAttempts, this.lockDurationMinutes);
+        throw new UnauthorizedException('Invalid two-factor code');
+      }
+    }
+    const result = await this.dataSource.getRepository(MagicLinkToken).createQueryBuilder()
+      .update().set({ used: true })
+      .where('"tokenHash" = :hash', { hash: createHash('sha256').update(token).digest('hex') })
+      .andWhere('"userId" = :userId', { userId: user.id })
+      .andWhere('used = false').andWhere('"expiresAt" > :now', { now: new Date() }).execute();
+    if (result.affected !== 1) throw new UnauthorizedException('Invalid or expired sign-in link');
+    const hasPasskeys = await this.webAuthnService.hasCredentials(user.id);
+    if (payload.purpose === 'magic-link' && (user.twoFactorEnabled || hasPasskeys)) {
+      const twoFactorToken = await this.jwtService.signAsync({ sub: user.id, purpose: 'two-factor-login', jti: randomUUID(), ...(deviceId ? { deviceId } : {}) }, { expiresIn: '5m' });
+      await this.dataSource.getRepository(MagicLinkToken).save({ userId: user.id, tokenHash: createHash('sha256').update(twoFactorToken).digest('hex'), expiresAt: new Date(Date.now() + 5 * 60000), used: false });
+      return {
+        '2fa_required': true,
+        twoFactorToken,
+        availableMethods: [...(user.twoFactorEnabled && user.twoFactorSecret ? ['totp'] : []), ...(hasPasskeys ? ['passkey'] : [])],
+      };
+    }
+    return this.completeLogin(user, ipAddress, userAgent, deviceId);
   }
 
   async register(
@@ -355,7 +429,7 @@ export class AuthService {
       userAgent,
       { deviceFingerprint, countryCode },
     );
-    const payload = { sub: user.id, email: user.email, roles: user.roles };
+    const payload = { sub: user.id, email: user.email, roles: user.roles, sid: session.id };
     const [access_token, refresh_token] = await Promise.all([
       this.jwtService.signAsync(payload),
       this.generateRefreshToken(user.id, undefined, session.id),
@@ -388,6 +462,22 @@ export class AuthService {
       );
     }
     return { access_token, refresh_token, user: userWithoutPassword };
+  }
+
+  async completeOAuthLogin(
+    userId: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ) {
+    const user = await this.usersService.findByIdWithSecrets(userId);
+    if (!user || user.deletedAt || !user.isActive) {
+      throw new UnauthorizedException('OAuth login is not available for this account');
+    }
+    if (this.usersService.isAccountLocked(user)) {
+      throw new ForbiddenException('Account is locked. Please try again later.');
+    }
+    await this.assertPasswordLoginAllowed(user.id);
+    return this.completeLogin(user, ipAddress, userAgent);
   }
 
   async enableTwoFactor(
@@ -820,16 +910,15 @@ export class AuthService {
         throw new UnauthorizedException('Invalid or expired refresh token');
       }
 
-      await manager.update(RefreshToken, { id: tokenRecord.id }, { revoked: true });
-
       let sessionId = tokenRecord.sessionId;
       if (sessionId) {
         const touched = await this.sessionsService.touchSession(
           sessionId,
           sessionMeta?.ipAddress,
           sessionMeta?.userAgent,
+          user.id,
         );
-        if (!touched) sessionId = null;
+        if (!touched) throw new UnauthorizedException('Session expired or revoked');
       }
       if (!sessionId) {
         const session = await this.sessionsService.createSession(
@@ -840,7 +929,9 @@ export class AuthService {
         sessionId = session.id;
       }
 
-      const payload = { sub: user.id, email: user.email, roles: user.roles };
+      await manager.update(RefreshToken, { id: tokenRecord.id }, { revoked: true });
+
+      const payload = { sub: user.id, email: user.email, roles: user.roles, sid: sessionId };
       const [access_token, refresh_token] = await Promise.all([
         this.jwtService.signAsync(payload),
         this.generateRefreshToken(user.id, manager, sessionId),
@@ -1117,7 +1208,7 @@ export class AuthService {
     const hashedPassword = await bcrypt.hash(resetPasswordDto.newPassword, 10);
 
     // Check if new password matches any recent password in history
-    await this.passwordHistoryService.validatePasswordNotReused(user.id, hashedPassword);
+    await this.passwordHistoryService.validatePasswordNotReused(user.id, resetPasswordDto.newPassword);
 
     await this.usersService.updatePassword(user.id, hashedPassword);
     await this.userRepository.update(

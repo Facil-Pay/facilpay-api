@@ -62,11 +62,13 @@ import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import { GetPaymentsDto, PaymentSortBy } from './dto/get-payments.dto';
 import { PaymentTimelineEvent } from './dto/payment-timeline.dto';
 import { Payment } from './payment.entity';
+import { CreatePaymentNoteDto } from './dto/create-payment-note.dto';
 import { Refund } from './refund.entity';
 import { SortOrder } from '../../common/dto/pagination.dto';
 import {
   WebhookThrottle,
   BulkThrottle,
+  VerifyThrottle,
 } from '../throttler/throttler.decorator';
 import { WebhookGuard } from './webhook.guard';
 import { IdempotencyInterceptor } from './idempotency.interceptor';
@@ -76,6 +78,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../../common/constants/roles';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
+import { VerifyTransactionDto } from './dto/verify-transaction.dto';
+import { PaymentVerificationService } from './payment-verification.service';
 
 @ApiTags('payments')
 @Controller('v1/payments')
@@ -87,6 +91,7 @@ export class PaymentsController {
     private readonly paymentSseService: PaymentSseService,
     private readonly merchantsService: MerchantsService,
     private readonly invoiceService: InvoiceService,
+    private readonly paymentVerificationService: PaymentVerificationService,
   ) { }
 
   @Post()
@@ -96,7 +101,8 @@ export class PaymentsController {
   @ApiOperation({
     summary: 'Create a payment',
     description:
-      'Initiates a new payment record with PENDING status. Supports idempotency via the Idempotency-Key header to safely retry requests without creating duplicates.',
+      'Initiates a new payment record with PENDING status. Supports idempotency via the Idempotency-Key header to safely retry requests without creating duplicates. ' +
+      'When the merchant has muxed accounts enabled, the response includes a unique `depositAddress` (M... address) and its `muxedId`; payers can send there without a memo.',
   })
   @ApiHeader({
     name: 'Idempotency-Key',
@@ -124,6 +130,9 @@ export class PaymentsController {
         status: 'PENDING',
         description: 'Payment for order #12345',
         externalReference: null,
+        depositAddress:
+          'MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ',
+        muxedId: '441234567890123456',
         createdAt: '2026-01-26T10:00:00.000Z',
         updatedAt: '2026-01-26T10:00:00.000Z',
       },
@@ -481,8 +490,20 @@ export class PaymentsController {
     example: '123e4567-e89b-12d3-a456-426614174000',
   })
   @ApiOkResponse({
-    description: 'Payment found.',
+    description:
+      'Payment found. Includes `depositAddress` and `muxedId` when a muxed deposit address was generated.',
     type: Payment,
+    schema: {
+      example: {
+        id: '123e4567-e89b-12d3-a456-426614174000',
+        amount: '100.50',
+        currency: 'USD',
+        status: 'PENDING',
+        depositAddress:
+          'MA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUAAAAAAAAAAAAGZFQ',
+        muxedId: '441234567890123456',
+      },
+    },
   })
   @ApiNotFoundResponse({
     description: 'Payment not found.',
@@ -514,6 +535,36 @@ export class PaymentsController {
     const payment = await this.paymentsService.findOne(id);
     const refunds = await this.paymentsService.getRefunds(id);
     return { ...payment, refunds };
+  }
+
+  @Post(':id/notes')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Add an internal note to a payment',
+    description: 'Adds a merchant-only note that is not included in payment webhooks or payment detail responses.',
+  })
+  @ApiParam({ name: 'id', description: 'Payment UUID' })
+  @ApiBody({ type: CreatePaymentNoteDto })
+  @ApiCreatedResponse({ description: 'Internal payment note created.' })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  async createNote(
+    @Param('id') id: string,
+    @Body() dto: CreatePaymentNoteDto,
+    @Request() req: any,
+  ) {
+    return this.paymentsService.addPaymentNote(id, req.user.id, dto.body);
+  }
+
+  @Get(':id/notes')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({ summary: 'List internal notes for a payment' })
+  @ApiParam({ name: 'id', description: 'Payment UUID' })
+  @ApiOkResponse({ description: 'Internal notes for the merchant payment.' })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  async getNotes(@Param('id') id: string, @Request() req: any) {
+    return this.paymentsService.getPaymentNotes(id, req.user.id);
   }
 
   @Patch(':id')
@@ -836,8 +887,11 @@ export class PaymentsController {
   })
   @ApiNotFoundResponse({ description: 'Payment not found.' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid bearer token.' })
-  async getTimeline(@Param('id') id: string): Promise<PaymentTimelineEvent[]> {
-    return this.paymentsService.getTimeline(id);
+  async getTimeline(
+    @Param('id') id: string,
+    @Request() req: any,
+  ): Promise<PaymentTimelineEvent[]> {
+    return this.paymentsService.getTimeline(id, req.user.id);
   }
 
   // ──────────────────────────────────────────
@@ -992,5 +1046,56 @@ export class PaymentsController {
   @ApiNotFoundResponse({ description: 'Payment not found.' })
   streamEvents(@Param('id') id: string): Observable<MessageEvent> {
     return this.paymentSseService.subscribe(id);
+  }
+
+  // ── On-chain payment proof verification ───────────────────────────────────
+
+  @VerifyThrottle()
+  @Post(':id/verify-transaction')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({
+    summary: 'Verify an on-chain transaction against a payment',
+    description:
+      'Fetches the transaction from Horizon and compares its destination, asset, amount ' +
+      'and memo against the stored payment record. Returns a structured result listing ' +
+      'every mismatched field. When completeOnMatch is true and all fields match, the ' +
+      'payment is completed immediately (only valid when it is still PENDING).',
+  })
+  @ApiParam({ name: 'id', description: 'Payment UUID' })
+  @ApiBearerAuth('bearer')
+  @ApiOkResponse({
+    description: 'Verification result',
+    schema: {
+      example: {
+        matched: true,
+        mismatches: [],
+        paymentCompleted: false,
+        transactionHash: 'a1b2c3...',
+        onChain: {
+          destination: 'GABCD...',
+          assetCode: 'USDC',
+          amount: '100.0000000',
+          memo: 'PAY-ref-001',
+          from: 'GXYZ...',
+          createdAt: '2026-01-26T10:00:00Z',
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Transaction not found on-chain or invalid hash.' })
+  @ApiNotFoundResponse({ description: 'Payment not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  async verifyTransaction(
+    @Param('id') id: string,
+    @Body() dto: VerifyTransactionDto,
+    @CurrentUser() user: User,
+  ) {
+    return this.paymentVerificationService.verifyTransaction(
+      id,
+      dto.transactionHash,
+      dto.completeOnMatch ?? false,
+      user.id,
+    );
   }
 }

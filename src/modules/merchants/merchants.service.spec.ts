@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { MerchantSettings } from './entities/merchant-settings.entity';
+import { MerchantOnboarding } from '../onboarding/merchant-onboarding.entity';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { MerchantsService } from './merchants.service';
 import { MerchantGeoRestriction } from './entities/merchant-geo-restriction.entity';
 import { MerchantIpAllowlist } from './entities/merchant-ip-allowlist.entity';
@@ -30,6 +33,9 @@ describe('MerchantsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MerchantsService,
+        { provide: getRepositoryToken(MerchantSettings), useValue: { findOneBy: jest.fn(), create: jest.fn(value => ({ ...value })), save: jest.fn(value => Promise.resolve(value)) } },
+        { provide: getRepositoryToken(MerchantOnboarding), useValue: {} },
+        { provide: AuditLogsService, useValue: { record: jest.fn() } },
         { provide: getRepositoryToken(MerchantGeoRestriction), useValue: mockRepo },
         { provide: getRepositoryToken(MerchantIpAllowlist), useValue: mockIpAllowlistRepo },
         { provide: GeoLookupService, useValue: mockGeoLookupService },

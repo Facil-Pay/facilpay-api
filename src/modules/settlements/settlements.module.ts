@@ -23,6 +23,9 @@ import { Refund } from '../payments/refund.entity';
 @Module({
   imports: [
     ConfigModule,
+    AuthModule,
+    StellarModule,
+    AuditLogsModule,
     ScheduleModule.forRoot(),
     TypeOrmModule.forFeature([
       Settlement,

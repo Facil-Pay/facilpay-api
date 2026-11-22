@@ -13,6 +13,7 @@ import { JwtAuthGuard } from '../src/modules/auth/guards/jwt-auth.guard';
 import { MerchantSamlConfig } from '../src/modules/auth/entities/merchant-saml-config.entity';
 import { MerchantMember, TeamRole } from '../src/modules/team/entities/merchant-member.entity';
 import { User } from '../src/modules/users/user.entity';
+import { MerchantSettings } from '../src/modules/merchants/entities/merchant-settings.entity';
 import { Session } from '../src/modules/sessions/session.entity';
 import { RefreshToken } from '../src/modules/auth/entities/refresh-token.entity';
 import { SecurityStore } from './helpers/security-store';
@@ -32,7 +33,7 @@ describe('SAML with a signing mock IdP (HTTP)', () => {
     // Exercise the real shared completion method and sessions module service.
     const auth = Object.create(AuthService.prototype) as AuthService;
     Object.assign(auth, {
-      sessionsService: new SessionsService(db.getRepository(Session), db.getRepository(RefreshToken)),
+      sessionsService: new SessionsService(db.getRepository(Session), db.getRepository(RefreshToken), db.getRepository(MerchantSettings), db.getRepository(MerchantMember)),
       jwtService: new JwtService({ secret: 'test-secret', signOptions: { expiresIn: '1h' } }),
       refreshTokenRepository: db.getRepository(RefreshToken), configService: new ConfigService(),
       geoLookupService: { lookupCountry: () => null }, logger: { info: () => {} },

@@ -16,6 +16,13 @@ export class UpdateSettingsDto {
   @Transform(({ obj }) => obj.require2fa)
   require2fa?: boolean;
 
+  @ApiPropertyOptional({ description: 'Expire inactive sessions after this many minutes. Null disables idle expiration.', nullable: true, minimum: 1, maximum: 43200 })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(43200)
+  idleSessionTimeoutMinutes?: number | null;
+
   @ApiPropertyOptional({ description: 'Enable or disable invoice reminders', default: true })
   @IsOptional()
   @IsBoolean()
@@ -42,6 +49,16 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsTimeZone()
   timezone?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Enable per-payment Stellar muxed (M-address) deposit addresses for this merchant. ' +
+      'When enabled, new payments receive a unique deposit address that matches incoming deposits without a memo.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  muxedAccountsEnabled?: boolean;
 
   @ApiPropertyOptional({
     description:

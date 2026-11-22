@@ -41,8 +41,23 @@ export class CheckoutSession {
   @Column({ length: 3 })
   currency: string;
 
+  /** Amount due in smallest currency unit, after any coupon discount. */
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   total: number;
+
+  /** Line-item total before discount, in smallest currency unit. */
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  subtotal: number | null;
+
+  /** Coupon discount in smallest currency unit. */
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  discountAmount: number;
+
+  @Column({ type: 'uuid', nullable: true })
+  couponId: string | null;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  couponCode: string | null;
 
   @Column({ nullable: true })
   customerId: string | null;

@@ -285,6 +285,7 @@ export class MerchantsController {
     schema: {
       example: {
         merchantId: 'abc123-merchant-uuid',
+        idleSessionTimeoutMinutes: null,
         remindersEnabled: true,
         reminderOffsets: [-3, 0, 7],
         createdAt: '2026-01-26T10:00:00.000Z',

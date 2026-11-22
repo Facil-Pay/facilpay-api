@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { compare } from 'bcrypt';
 import { PasswordHistory } from './entities/password-history.entity';
 
-const PASSWORD_HISTORY_LIMIT = 5; // Keep last 5 passwords
+export const PASSWORD_HISTORY_LIMIT = 5; // Keep last 5 passwords
 
 @Injectable()
 export class PasswordHistoryService {
@@ -15,11 +15,13 @@ export class PasswordHistoryService {
 
   /**
    * Check if the new password matches any of the user's recent passwords.
+   * Takes the plain-text password, since bcrypt hashes are salted and can
+   * only be compared against a plain value.
    * Throws BadRequestException if password reuse is detected.
    */
   async validatePasswordNotReused(
     userId: string,
-    newPasswordHash: string,
+    newPassword: string,
   ): Promise<void> {
     // Get the user's password history (last N passwords)
     const history = await this.passwordHistoryRepository.find({
@@ -35,7 +37,7 @@ export class PasswordHistoryService {
 
     // Check if new password matches any historical password
     for (const entry of history) {
-      const isMatch = await compare(newPasswordHash, entry.passwordHash);
+      const isMatch = await compare(newPassword, entry.passwordHash);
       if (isMatch) {
         throw new BadRequestException(
           `You cannot reuse a password from your recent history. Please choose a different password.`,

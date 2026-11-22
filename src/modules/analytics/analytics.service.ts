@@ -69,6 +69,26 @@ export interface PaymentAnalyticsResult {
   series: AnalyticsSeries[];
 }
 
+export interface RefundsDisputesBucket {
+  start: string;
+  localStart: string;
+  refundCount: number;
+  refundAmount: string;
+  refundRate: number | null;
+  disputeCount: number;
+  disputeAmount: string;
+  disputeRate: number | null;
+}
+
+export interface RefundsDisputesAnalyticsResult {
+  from: string;
+  to: string;
+  interval: AnalyticsInterval;
+  timezone: string;
+  currency: string | null;
+  buckets: RefundsDisputesBucket[];
+}
+
 interface Aggregate {
   gross: number;
   fees: number;
@@ -124,6 +144,134 @@ export class AnalyticsService {
     const result = await this.query(merchantId, from, to, interval, timezone, currency, groupBy);
     this.remember(cacheKey, result);
     return result;
+  }
+
+  async getRefundsDisputesAnalytics(
+    merchantId: string,
+    dto: GetPaymentAnalyticsDto,
+  ): Promise<RefundsDisputesAnalyticsResult> {
+    const interval = dto.interval ?? AnalyticsInterval.DAY;
+    const to = dto.to ? new Date(dto.to) : new Date();
+    const from = dto.from ? new Date(dto.from) : new Date(to.getTime() - DEFAULT_RANGE_MS);
+    if (from >= to) {
+      throw new BadRequestException('`from` must be before `to`');
+    }
+    if ((to.getTime() - from.getTime()) / APPROX_BUCKET_MS[interval] > MAX_BUCKETS) {
+      throw new BadRequestException(
+        `Range too large for interval "${interval}" (max ${MAX_BUCKETS} buckets)`,
+      );
+    }
+
+    const timezone = dto.timezone ?? (await this.getMerchantTimezone(merchantId));
+    const currency = dto.currency ?? null;
+    const keyFormat = `'YYYY-MM-DD"T"HH24:MI:SS'`;
+    const localBucket = (column: string) =>
+      `date_trunc($2, ${column} AT TIME ZONE 'UTC' AT TIME ZONE $3)`;
+    const bucketRows: { key: string; start: Date }[] = await this.dataSource.query(
+      `SELECT to_char(gs, ${keyFormat}) AS key, (gs AT TIME ZONE $2) AS start
+         FROM generate_series(
+                date_trunc($1, $3::timestamptz AT TIME ZONE $2),
+                date_trunc($1, ($4::timestamptz - interval '1 microsecond') AT TIME ZONE $2),
+                ('1 ' || $1)::interval
+              ) AS gs
+        ORDER BY gs`,
+      [interval, timezone, from, to],
+    );
+
+    const baseParams: unknown[] = [merchantId, interval, timezone, from, to];
+    const paymentParams = currency ? [...baseParams, SUCCESS_STATUSES, currency] : [...baseParams, SUCCESS_STATUSES];
+    const eventParams = currency ? [...baseParams, currency] : baseParams;
+    const paymentCurrencyFilter = currency ? 'AND p."currency" = $7' : '';
+    const eventCurrencyFilter = currency ? 'AND p."currency" = $6' : '';
+    const [paymentRows, refundRows, disputeRows] = await Promise.all([
+      this.dataSource.query(
+        `SELECT to_char(${localBucket('p."createdAt"')}, ${keyFormat}) AS key,
+                COUNT(*)::int AS count
+           FROM "payments" p
+          WHERE p."merchantId" = $1
+            AND p."status" = ANY($6)
+            AND p."createdAt" >= ($4::timestamptz AT TIME ZONE 'UTC')
+            AND p."createdAt" < ($5::timestamptz AT TIME ZONE 'UTC')
+            ${paymentCurrencyFilter}
+          GROUP BY 1`,
+        paymentParams,
+      ),
+      this.dataSource.query(
+        `SELECT to_char(${localBucket('r."createdAt"')}, ${keyFormat}) AS key,
+                COUNT(DISTINCT r."paymentId")::int AS count,
+                COALESCE(SUM(r."amount"), 0)::text AS amount
+           FROM "refunds" r
+           JOIN "payments" p ON p."id" = r."paymentId"
+          WHERE p."merchantId" = $1
+            AND r."createdAt" >= ($4::timestamptz AT TIME ZONE 'UTC')
+            AND r."createdAt" < ($5::timestamptz AT TIME ZONE 'UTC')
+            ${eventCurrencyFilter}
+          GROUP BY 1`,
+        eventParams,
+      ),
+      this.dataSource.query(
+        `SELECT to_char(${localBucket('d."createdAt"')}, ${keyFormat}) AS key,
+                COUNT(DISTINCT d."paymentId")::int AS count,
+                COALESCE(SUM(d."disputedAmount"), 0)::text AS amount
+           FROM "disputes" d
+           JOIN "payments" p ON p."id" = d."paymentId"
+          WHERE p."merchantId" = $1
+            AND d."createdAt" >= ($4::timestamptz AT TIME ZONE 'UTC')
+            AND d."createdAt" < ($5::timestamptz AT TIME ZONE 'UTC')
+            ${eventCurrencyFilter}
+          GROUP BY 1`,
+        eventParams,
+      ),
+    ]);
+
+    const aggregates = new Map<string, {
+      paymentCount: number;
+      refundCount: number;
+      refundAmount: number;
+      disputeCount: number;
+      disputeAmount: number;
+    }>();
+    for (const { key } of bucketRows) {
+      aggregates.set(key, {
+        paymentCount: 0,
+        refundCount: 0,
+        refundAmount: 0,
+        disputeCount: 0,
+        disputeAmount: 0,
+      });
+    }
+    for (const row of paymentRows) aggregates.get(row.key).paymentCount = Number(row.count);
+    for (const row of refundRows) {
+      const agg = aggregates.get(row.key);
+      agg.refundCount = Number(row.count);
+      agg.refundAmount = Number(row.amount);
+    }
+    for (const row of disputeRows) {
+      const agg = aggregates.get(row.key);
+      agg.disputeCount = Number(row.count);
+      agg.disputeAmount = Number(row.amount);
+    }
+
+    return {
+      from: from.toISOString(),
+      to: to.toISOString(),
+      interval,
+      timezone,
+      currency,
+      buckets: bucketRows.map(({ key, start }) => {
+        const agg = aggregates.get(key);
+        return {
+          start: new Date(start).toISOString(),
+          localStart: key,
+          refundCount: agg.refundCount,
+          refundAmount: money(agg.refundAmount),
+          refundRate: agg.paymentCount > 0 ? Number((agg.refundCount / agg.paymentCount).toFixed(4)) : null,
+          disputeCount: agg.disputeCount,
+          disputeAmount: money(agg.disputeAmount),
+          disputeRate: agg.paymentCount > 0 ? Number((agg.disputeCount / agg.paymentCount).toFixed(4)) : null,
+        };
+      }),
+    };
   }
 
   private async query(

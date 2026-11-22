@@ -410,6 +410,15 @@ Each backup code is 8 hex characters (4 random bytes), giving ~4 billion possibl
 
 ---
 
+## See Also
+
+- [WebAuthn](WEBAUTHN.md) — Detailed passkey registration and authentication flows
+- [Password Reset](PASSWORD_RESET.md) — Password reset flow
+- [Sessions](SESSIONS.md) — Session management
+- [Environment](ENVIRONMENT.md) — Configuration reference
+
+---
+
 ## Database Schema
 
 ### users table (2FA columns)

@@ -26,8 +26,10 @@
 </table>
 
 <p>
-  <a href="{{manageUrl}}">Gestionar suscripción</a> |
+  <a href="{{manageUrl}}">Gestionar suscripción</a>
+  {{#if cancelUrl}}|
   <a href="{{cancelUrl}}">Cancelar suscripción</a>
+  {{/if}}
 </p>
 
 <p>

@@ -10,7 +10,12 @@ import {
   Query,
   Req,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  HttpCode,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request } from 'express';
 import {
   ApiBadRequestResponse,
@@ -73,6 +78,29 @@ export class PayoutsController {
       req.ip,
       req.headers['user-agent'],
     );
+  }
+
+  @Post('bulk')
+  @UseGuards(PermissionsGuard)
+  @Permissions('payouts:create')
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 1024 * 1024 } }))
+  @ApiOperation({ summary: 'Upload a CSV of payouts (multipart field: file)' })
+  createBulk(
+    @CurrentUser() user: User,
+    @UploadedFile() file: { buffer: Buffer } | undefined,
+    @Headers('x-step-up-token') token: string,
+  ) {
+    if (!file?.buffer) throw new BadRequestException('CSV file is required');
+    return this.payoutsService.createBulk(user.id, file.buffer.toString('utf8'), token);
+  }
+
+  @Post(':id/cancel')
+  @HttpCode(200)
+  @UseGuards(PermissionsGuard)
+  @Permissions('payouts:create')
+  @ApiOperation({ summary: 'Cancel a pending payout and release its balance' })
+  cancel(@CurrentUser() user: User, @Param('id', ParseUUIDPipe) id: string) {
+    return this.payoutsService.cancel(user.id, id);
   }
 
   @Get()

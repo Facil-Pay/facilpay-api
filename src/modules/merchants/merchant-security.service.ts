@@ -59,7 +59,7 @@ export class MerchantSecurityService {
       if (dto.apiKeyInactivityDays !== undefined && dto.apiKeyInactivityDays !== settings.apiKeyInactivityDays) {
         await manager.getRepository(ApiKey).update({ userId: merchantId, isActive: true }, { inactivityWarningAt: null, inactivityRevokeAt: null });
       }
-      for (const field of ['remindersEnabled', 'reminderOffsets', 'timezone', 'refundApprovalThresholds', 'apiKeyInactivityDays', 'require2fa'] as const) {
+      for (const field of ['remindersEnabled', 'reminderOffsets', 'timezone', 'refundApprovalThresholds', 'apiKeyInactivityDays', 'require2fa', 'idleSessionTimeoutMinutes', 'muxedAccountsEnabled'] as const) {
         if (dto[field] !== undefined) Object.assign(settings, { [field]: dto[field] });
       }
       if (newlyRequired) {

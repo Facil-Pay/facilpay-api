@@ -15,6 +15,7 @@ export class PaymentTimelineEvent {
       'payment.status_updated',
       'payment.cancelled',
       'payment.expired',
+      'payment.note_added',
       'refund.created',
       'payment.split_processed',
       'dispute.opened',

@@ -93,12 +93,30 @@ export class CreateCheckoutSessionDto {
   @IsUrl()
   cancelUrl: string;
 
+  @ApiPropertyOptional({
+    description: 'Coupon code to apply. Validated against the session currency and amount.',
+    example: 'SPRING10',
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  couponCode?: string;
+
   @ApiPropertyOptional({ description: 'Session expiry in minutes', example: 30, default: 30 })
   @IsOptional()
   @IsInt()
   @Min(5)
   @Max(1440) // Max 24 hours
   expiresInMinutes?: number;
+}
+
+export class ApplyCheckoutCouponDto {
+  @ApiProperty({ description: 'Coupon code to apply to the session', example: 'SPRING10' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  couponCode: string;
 }
 
 export class UpdateCheckoutSessionDto extends PartialType(CreateCheckoutSessionDto) {}
@@ -135,6 +153,15 @@ export class PublicCheckoutSessionDto {
 
   @ApiProperty({ description: 'Line items' })
   lineItems: LineItemDto[];
+
+  @ApiProperty({ description: 'Subtotal before discount, formatted' })
+  subtotalFormatted: string;
+
+  @ApiProperty({ description: 'Coupon discount, formatted' })
+  discountFormatted: string;
+
+  @ApiProperty({ description: 'Applied coupon code', nullable: true })
+  couponCode: string | null;
 
   @ApiProperty({ description: 'Total amount formatted' })
   totalFormatted: string;

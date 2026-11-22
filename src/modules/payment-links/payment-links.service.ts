@@ -7,7 +7,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { createHash, randomBytes } from 'crypto';
 import { PaymentLink, RESERVED_SLUGS, CustomField } from './payment-link.entity';
@@ -17,6 +17,11 @@ import { CouponsService, calculateCouponDiscount } from '../coupons/coupons.serv
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
 import { UpdatePaymentLinkDto } from './dto/update-payment-link.dto';
 import { RedeemPaymentLinkDto } from './dto/redeem-payment-link.dto';
+import {
+  BULK_DEACTIVATE_MAX_IDS,
+  BulkDeactivateResponse,
+  BulkDeactivateResult,
+} from './dto/bulk-deactivate-payment-links.dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 import { AppLogger } from '../logger/logger.service';
@@ -282,6 +287,44 @@ export class PaymentLinksService {
     if (link.merchantId !== merchantId) throw new ForbiddenException();
     link.isActive = false;
     await this.repo.save(link);
+  }
+
+  /**
+   * Deactivates many links at once. Ids that don't exist or belong to another
+   * merchant are reported as skipped (without revealing which) and left untouched.
+   */
+  async bulkDeactivate(ids: string[], merchantId: string): Promise<BulkDeactivateResponse> {
+    const uniqueIds = [...new Set(ids)];
+    if (uniqueIds.length > BULK_DEACTIVATE_MAX_IDS) {
+      throw new BadRequestException(`A maximum of ${BULK_DEACTIVATE_MAX_IDS} ids can be deactivated at once`);
+    }
+
+    const owned = uniqueIds.length
+      ? await this.repo.find({ where: { id: In(uniqueIds), merchantId } })
+      : [];
+    const ownedById = new Map(owned.map((link) => [link.id, link]));
+
+    const toDeactivate = owned.filter((link) => link.isActive).map((link) => link.id);
+    if (toDeactivate.length) {
+      await this.repo.update({ id: In(toDeactivate), merchantId }, { isActive: false });
+    }
+
+    const results: BulkDeactivateResult[] = uniqueIds.map((id) => {
+      const link = ownedById.get(id);
+      if (!link) return { id, status: 'skipped', reason: 'Payment link not found' };
+      return { id, status: link.isActive ? 'deactivated' : 'already_inactive' };
+    });
+
+    this.logger.info?.(
+      { merchantId, requested: uniqueIds.length, deactivated: toDeactivate.length },
+      'Bulk deactivated payment links',
+    );
+
+    return {
+      results,
+      deactivated: toDeactivate.length,
+      skipped: results.filter((r) => r.status === 'skipped').length,
+    };
   }
 
   async findAllByMerchant(

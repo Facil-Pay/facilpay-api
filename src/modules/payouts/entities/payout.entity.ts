@@ -13,6 +13,7 @@ export enum PayoutStatus {
   SUBMITTED = 'SUBMITTED',
   COMPLETED = 'COMPLETED',
   FAILED = 'FAILED',
+  CANCELLED = 'CANCELLED',
 }
 
 /** Statuses whose amount is reserved against the merchant's available balance. */
@@ -29,6 +30,10 @@ export class Payout {
   @PrimaryGeneratedColumn('uuid')
   @ApiProperty()
   id: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  @ApiPropertyOptional()
+  batchId: string | null = null;
 
   @Column()
   @ApiProperty()

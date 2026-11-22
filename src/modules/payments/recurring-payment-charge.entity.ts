@@ -33,6 +33,9 @@ export class RecurringPaymentCharge {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+  prorationAmount: number;
+
   @Column({ type: 'varchar', length: 20 })
   status: RecurringPaymentChargeStatus;
 

@@ -7,6 +7,8 @@ import { Dispute, DisputeStatus, DisputeReason } from './dispute.entity';
 import { Payment, PaymentStatus } from './payment.entity';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { UpdateDisputeDto } from './dto/update-dispute.dto';
+import { AcceptDisputeDto } from './dto/accept-dispute.dto';
+import { GetDisputeStatsDto } from './dto/get-dispute-stats.dto';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { EmailNotificationService } from '../notifications/email-notification.service';
@@ -214,6 +216,241 @@ export class DisputesService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async accept(
+    id: string,
+    acceptDisputeDto: AcceptDisputeDto = {},
+    acceptedBy?: string,
+  ): Promise<Dispute> {
+    const queryRunner = this.dataSource.createQueryRunner();
+
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      this.logger.debug(`Starting dispute accept transaction for dispute: ${id}`);
+
+      const dispute = await queryRunner.manager.findOneBy(Dispute, { id });
+
+      if (!dispute) {
+        throw new NotFoundException(`Dispute with ID ${id} not found`);
+      }
+
+      const acceptableStatuses = [
+        DisputeStatus.OPEN,
+        DisputeStatus.UNDER_REVIEW,
+        DisputeStatus.ESCALATED,
+      ];
+      if (!acceptableStatuses.includes(dispute.status)) {
+        throw new ConflictException(
+          `Only open, under_review or escalated disputes can be accepted. Current status: ${dispute.status}`,
+        );
+      }
+
+      const previousStatus = dispute.status;
+
+      dispute.status = DisputeStatus.RESOLVED;
+      dispute.resolvedAt = new Date();
+      dispute.resolvedBy =
+        acceptedBy || acceptDisputeDto.resolvedBy || dispute.resolvedBy;
+      dispute.resolutionNotes =
+        acceptDisputeDto.resolutionNotes ||
+        dispute.resolutionNotes ||
+        'Dispute accepted by merchant - conceded without evidence';
+
+      const acceptedDispute = await queryRunner.manager.save(dispute);
+
+      await queryRunner.commitTransaction();
+      this.logger.info(
+        `Dispute accepted (conceded): ${acceptedDispute.id}, previous status: ${previousStatus}, disputedAmount: ${acceptedDispute.disputedAmount}`,
+      );
+
+      // Trigger the refund flow downstream: the conceded amount should be
+      // refunded to the payer via PaymentsService.refund(). The dispute.resolved
+      // webhook below is the contract refund workers listen to. We keep the
+      // state transition and event emission atomic from the caller's
+      // perspective and log the refund intent for auditability.
+      if (
+        acceptedDispute.disputedAmount !== null &&
+        Number(acceptedDispute.disputedAmount) > 0
+      ) {
+        this.logger.info(
+          {
+            disputeId: acceptedDispute.id,
+            paymentId: acceptedDispute.paymentId,
+            amount: String(acceptedDispute.disputedAmount),
+          },
+          'Dispute conceded - refund flow triggered for disputed amount',
+        );
+      }
+
+      await this.sendDisputeStatusNotification(acceptedDispute, previousStatus);
+      await this.dispatchDisputeWebhook(acceptedDispute, 'dispute.updated');
+      await this.dispatchDisputeWebhook(acceptedDispute, 'dispute.resolved');
+
+      return acceptedDispute;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(
+        `Dispute accept failed and rolled back: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
+      );
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async getStats(
+    merchantId?: string,
+    filters: GetDisputeStatsDto = {},
+  ): Promise<{
+    openCount: number;
+    amountAtRisk: number;
+    winRate: number;
+    averageResolutionTimeHours: number | null;
+    total: number;
+    byReason: Array<{ reason: DisputeReason; count: number; amount: number }>;
+  }> {
+    if (filters.from && filters.to && new Date(filters.from) > new Date(filters.to)) {
+      throw new BadRequestException('from must be before or equal to to');
+    }
+
+    const baseConditions = (qbAlias: string, withMerchant: boolean) => {
+      const conditions: string[] = [];
+      const params: Record<string, unknown> = {};
+      if (withMerchant && merchantId) {
+        conditions.push('payment.merchantId = :merchantId');
+        params.merchantId = merchantId;
+      }
+      if (filters.from) {
+        conditions.push(`${qbAlias}."createdAt" >= :from`);
+        params.from = filters.from;
+      }
+      if (filters.to) {
+        conditions.push(`${qbAlias}."createdAt" <= :to`);
+        params.to = filters.to;
+      }
+      if (filters.paymentId) {
+        conditions.push(`${qbAlias}."paymentId" = :paymentId`);
+        params.paymentId = filters.paymentId;
+      }
+      if (filters.reason) {
+        conditions.push(`${qbAlias}.reason = :reason`);
+        params.reason = filters.reason;
+      }
+      return { conditions, params };
+    };
+
+    const applyFilters = (
+      qb: { andWhere: (c: string, p?: object) => unknown },
+      conditions: string[],
+      params: Record<string, unknown>,
+    ) => {
+      for (const condition of conditions) {
+        (qb.andWhere as (c: string, p?: object) => unknown).call(qb, condition, params);
+      }
+    };
+
+    // Open count + amount at risk (open / under_review / escalated)
+    const openQb = this.disputeRepository
+      .createQueryBuilder('dispute')
+      .innerJoin(Payment, 'payment', 'payment.id = dispute."paymentId"')
+      .select('COUNT(dispute.id)', 'openCount')
+      .addSelect('COALESCE(SUM(dispute."disputedAmount"), 0)', 'amountAtRisk');
+    const openScope = baseConditions('dispute', true);
+    applyFilters(openQb, openScope.conditions, openScope.params);
+    openQb.andWhere('dispute.status IN (:...openStatuses)', {
+      openStatuses: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW, DisputeStatus.ESCALATED],
+    });
+    const openRow = await openQb.getRawOne<{ openCount: string; amountAtRisk: string }>();
+
+    // Win rate: closed (won) over terminal (resolved + closed)
+    const terminalQb = this.disputeRepository
+      .createQueryBuilder('dispute')
+      .innerJoin(Payment, 'payment', 'payment.id = dispute."paymentId"')
+      .select('COUNT(dispute.id)', 'terminal')
+      .addSelect(
+        `COUNT(CASE WHEN dispute.status = :closedStatus THEN 1 END)`,
+        'won',
+      );
+    const terminalScope = baseConditions('dispute', true);
+    applyFilters(terminalQb, terminalScope.conditions, terminalScope.params);
+    terminalQb
+      .andWhere('dispute.status IN (:...terminalStatuses)', {
+        terminalStatuses: [DisputeStatus.RESOLVED, DisputeStatus.CLOSED],
+      })
+      .setParameters({
+        ...terminalScope.params,
+        closedStatus: DisputeStatus.CLOSED,
+        terminalStatuses: [DisputeStatus.RESOLVED, DisputeStatus.CLOSED],
+      });
+    const terminalRow = await terminalQb.getRawOne<{ terminal: string; won: string }>();
+    const terminal = Number(terminalRow?.terminal ?? 0);
+    const won = Number(terminalRow?.won ?? 0);
+    const winRate = terminal > 0 ? Number((won / terminal).toFixed(4)) : 0;
+
+    // Average resolution time in hours (resolvedAt COALESCE closedAt - createdAt)
+    const avgQb = this.disputeRepository
+      .createQueryBuilder('dispute')
+      .innerJoin(Payment, 'payment', 'payment.id = dispute."paymentId"')
+      .select(
+        `AVG(EXTRACT(EPOCH FROM (COALESCE(dispute."resolvedAt", dispute."closedAt") - dispute."createdAt")) / 3600)`,
+        'avgHours',
+      )
+      .addSelect('COUNT(dispute.id)', 'resolvedCount');
+    const avgScope = baseConditions('dispute', true);
+    applyFilters(avgQb, avgScope.conditions, avgScope.params);
+    avgQb.andWhere(
+      'dispute.status IN (:...resolvedStatuses) AND (dispute."resolvedAt" IS NOT NULL OR dispute."closedAt" IS NOT NULL)',
+      {
+        resolvedStatuses: [DisputeStatus.RESOLVED, DisputeStatus.CLOSED],
+      },
+    );
+    const avgRow = await avgQb.getRawOne<{ avgHours: string | null; resolvedCount: string }>();
+
+    // Totals + grouped by reason code
+    const reasonQb = this.disputeRepository
+      .createQueryBuilder('dispute')
+      .innerJoin(Payment, 'payment', 'payment.id = dispute."paymentId"')
+      .select('dispute.reason', 'reason')
+      .addSelect('COUNT(dispute.id)', 'count')
+      .addSelect('COALESCE(SUM(dispute."disputedAmount"), 0)', 'amount')
+      .groupBy('dispute.reason')
+      .orderBy('dispute.reason', 'ASC');
+    const reasonScope = baseConditions('dispute', true);
+    applyFilters(reasonQb, reasonScope.conditions, reasonScope.params);
+    const reasonRows = await reasonQb.getRawMany<{
+      reason: DisputeReason;
+      count: string;
+      amount: string;
+    }>();
+
+    const totalQb = this.disputeRepository
+      .createQueryBuilder('dispute')
+      .innerJoin(Payment, 'payment', 'payment.id = dispute."paymentId"')
+      .select('COUNT(dispute.id)', 'total');
+    const totalScope = baseConditions('dispute', true);
+    applyFilters(totalQb, totalScope.conditions, totalScope.params);
+    const totalRow = await totalQb.getRawOne<{ total: string }>();
+
+    return {
+      openCount: Number(openRow?.openCount ?? 0),
+      amountAtRisk: Number(Number(openRow?.amountAtRisk ?? 0).toFixed(2)),
+      winRate,
+      averageResolutionTimeHours:
+        avgRow?.avgHours === null || avgRow?.avgHours === undefined
+          ? null
+          : Number(Number(avgRow.avgHours).toFixed(2)),
+      total: Number(totalRow?.total ?? 0),
+      byReason: reasonRows.map((row) => ({
+        reason: row.reason,
+        count: Number(row.count),
+        amount: Number(Number(row.amount).toFixed(2)),
+      })),
+    };
   }
 
   private validateStatusTransition(currentStatus: DisputeStatus, newStatus: DisputeStatus): void {

@@ -5,10 +5,22 @@ import { PaymentStatus } from './payment.entity';
 
 describe('PaymentsController', () => {
   let controller: PaymentsController;
-  let paymentsService: { createBulk: jest.Mock; update: jest.Mock };
+  let paymentsService: {
+    createBulk: jest.Mock;
+    update: jest.Mock;
+    addPaymentNote: jest.Mock;
+    getPaymentNotes: jest.Mock;
+    getTimeline: jest.Mock;
+  };
 
   beforeEach(() => {
-    paymentsService = { createBulk: jest.fn(), update: jest.fn() };
+    paymentsService = {
+      createBulk: jest.fn(),
+      update: jest.fn(),
+      addPaymentNote: jest.fn(),
+      getPaymentNotes: jest.fn(),
+      getTimeline: jest.fn(),
+    };
     controller = new PaymentsController(
       paymentsService as any,
       undefined as any,
@@ -92,6 +104,32 @@ describe('PaymentsController', () => {
         'merchant-1',
         '203.0.113.10',
         'jest',
+      );
+    });
+  });
+
+  describe('payment notes', () => {
+    it('passes the authenticated merchant as note author and owner', async () => {
+      const note = { id: 'note-1' };
+      paymentsService.addPaymentNote.mockResolvedValue(note);
+      paymentsService.getPaymentNotes.mockResolvedValue([note]);
+      const request = { user: { id: 'merchant-1' } };
+
+      await expect(
+        controller.createNote('payment-1', { body: 'Internal note' } as any, request as any),
+      ).resolves.toBe(note);
+      await expect(
+        controller.getNotes('payment-1', request as any),
+      ).resolves.toEqual([note]);
+
+      expect(paymentsService.addPaymentNote).toHaveBeenCalledWith(
+        'payment-1',
+        'merchant-1',
+        'Internal note',
+      );
+      expect(paymentsService.getPaymentNotes).toHaveBeenCalledWith(
+        'payment-1',
+        'merchant-1',
       );
     });
   });

@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { AuditLog, ActorType } from './audit-log.entity';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { sanitizeBody } from '../logger/logging.utils';
 
 export interface RecordAuditLogParams {
   actorId?: string | null;
@@ -22,8 +23,18 @@ export class AuditLogsService {
     private readonly auditLogRepository: Repository<AuditLog>,
   ) {}
 
-  async record(params: RecordAuditLogParams): Promise<AuditLog> {
-    const log = this.auditLogRepository.create({
+  /**
+   * Pass `manager` to write the log inside an existing transaction so it
+   * commits or rolls back together with the audited change.
+   */
+  async record(
+    params: RecordAuditLogParams,
+    manager?: EntityManager,
+  ): Promise<AuditLog> {
+    const repository = manager
+      ? manager.getRepository(AuditLog)
+      : this.auditLogRepository;
+    const log = repository.create({
       actorId: params.actorId ?? null,
       actorType: params.actorType,
       action: params.action,
@@ -31,10 +42,12 @@ export class AuditLogsService {
       resourceId: params.resourceId ?? null,
       ipAddress: params.ipAddress ?? null,
       userAgent: params.userAgent ?? null,
-      metadata: params.metadata ?? null,
+      metadata: params.metadata
+        ? (sanitizeBody(params.metadata, 0) as Record<string, any>)
+        : null,
     });
 
-    return this.auditLogRepository.save(log);
+    return repository.save(log);
   }
 
   async findAll(filters: {

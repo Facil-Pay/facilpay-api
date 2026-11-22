@@ -9,6 +9,7 @@ import { MerchantsModule } from '../merchants/merchants.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { ProductsModule } from '../products/products.module';
+import { CouponsModule } from '../coupons/coupons.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ProductsModule } from '../products/products.module';
     WebhooksModule,
     PaymentsModule,
     ProductsModule,
+    CouponsModule,
   ],
   controllers: [CheckoutSessionsController, CheckoutSessionsPublicController],
   providers: [CheckoutSessionsService],

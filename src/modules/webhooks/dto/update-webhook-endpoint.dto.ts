@@ -2,8 +2,14 @@ import { IsUrl, IsArray, ArrayNotEmpty, IsEnum, ArrayUnique, IsOptional, IsBoole
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WEBHOOK_EVENT_TYPES, WebhookEventType } from '../entities/webhook-endpoint.entity';
 import { SUPPORTED_API_VERSIONS, CURRENT_API_VERSION } from '../payload-serializers/registry';
+import { IsObject } from 'class-validator';
 
 export class UpdateWebhookEndpointDto {
+  @IsOptional()
+  @IsObject()
+  @ApiPropertyOptional({ description: 'Replacement custom headers; use {} to clear' })
+  headers?: Record<string, string>;
+
   @IsOptional()
   @IsUrl({ protocols: ['https'], require_protocol: true }, { message: 'url must be a valid HTTPS URL' })
   @ApiPropertyOptional({

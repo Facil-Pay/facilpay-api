@@ -24,3 +24,8 @@ export const BulkThrottle = () => Throttle({ bulk: 20 } as any);
  * Apply QR code generation throttle limit (20 requests per minute)
  */
 export const QrThrottle = () => Throttle({ qr: 20 } as any);
+
+/**
+ * Apply transaction verification throttle limit (10 requests per minute)
+ */
+export const VerifyThrottle = () => Throttle({ verify: 10 } as any);

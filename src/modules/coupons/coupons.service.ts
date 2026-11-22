@@ -20,7 +20,7 @@ export function calculateCouponDiscount(amount: number, coupon: Coupon): number 
 
 export function assertCouponUsable(
   coupon: Coupon | null,
-  linkId: string,
+  linkId: string | null,
   currency: string,
 ): asserts coupon is Coupon {
   if (!coupon || !coupon.isActive) {
@@ -35,7 +35,10 @@ export function assertCouponUsable(
   ) {
     throw new UnprocessableEntityException('Coupon redemption limit reached');
   }
-  if (coupon.applicableLinkIds && !coupon.applicableLinkIds.includes(linkId)) {
+  if (coupon.applicableLinkIds && linkId === null) {
+    throw new UnprocessableEntityException('Coupon is restricted to specific payment links');
+  }
+  if (coupon.applicableLinkIds && linkId !== null && !coupon.applicableLinkIds.includes(linkId)) {
     throw new UnprocessableEntityException('Coupon does not apply to this payment link');
   }
   if (coupon.type === CouponType.FIXED && coupon.currency !== currency) {
@@ -135,6 +138,50 @@ export class CouponsService {
     });
     assertCouponUsable(coupon, linkId, currency);
     return coupon;
+  }
+
+  /** Validates a coupon for a hosted checkout session (not tied to a payment link). */
+  async validateForCheckoutSession(
+    merchantId: string,
+    code: string,
+    currency: string,
+  ): Promise<Coupon> {
+    const coupon = await this.repository.findOneBy({
+      merchantId,
+      code: code.trim().toUpperCase(),
+    });
+    assertCouponUsable(coupon, null, currency);
+    return coupon;
+  }
+
+  /**
+   * Atomically counts one redemption, re-checking that the coupon is still
+   * active, unexpired and under its limit. Throws if it no longer is.
+   */
+  async redeem(couponId: string): Promise<void> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(Coupon)
+      .set({ redemptions: () => '"redemptions" + 1' })
+      .where('id = :couponId', { couponId })
+      .andWhere('"isActive" = true')
+      .andWhere('("expiresAt" IS NULL OR "expiresAt" > now())')
+      .andWhere('("maxRedemptions" IS NULL OR "redemptions" + "reservedRedemptions" < "maxRedemptions")')
+      .execute();
+    if (result.affected !== 1) {
+      throw new UnprocessableEntityException('Coupon is no longer valid');
+    }
+  }
+
+  /** Reverses a redemption counted by `redeem` when the purchase did not go through. */
+  async releaseRedemption(couponId: string): Promise<void> {
+    await this.repository
+      .createQueryBuilder()
+      .update(Coupon)
+      .set({ redemptions: () => '"redemptions" - 1' })
+      .where('id = :couponId', { couponId })
+      .andWhere('"redemptions" > 0')
+      .execute();
   }
 
   private validateValue(type: CouponType, value: number): void {

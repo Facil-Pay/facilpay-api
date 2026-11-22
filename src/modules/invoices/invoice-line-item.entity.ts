@@ -6,7 +6,7 @@ import {
   PrimaryGeneratedColumn,
 } from 'typeorm';
 import { Invoice } from './invoice.entity';
-import { Product } from '../../products/product.entity';
+import { Product } from '../products/product.entity';
 
 @Entity('invoice_line_items')
 export class InvoiceLineItem {

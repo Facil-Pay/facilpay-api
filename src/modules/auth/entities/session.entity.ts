@@ -33,6 +33,9 @@ export class Session {
   @Column({ type: 'timestamp with time zone' })
   lastActiveAt: Date;
 
+  @Column({ type: 'timestamptz', default: () => 'CURRENT_TIMESTAMP' })
+  lastSeenAt: Date;
+
   @Column({ type: 'timestamp with time zone' })
   expiresAt: Date;
 

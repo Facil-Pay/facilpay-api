@@ -48,6 +48,17 @@ export class MailService {
     });
   }
 
+  async sendMagicLinkEmail(to: string, token: string): Promise<void> {
+    const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
+    const url = appUrl + '/auth/magic-link?token=' + encodeURIComponent(token);
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('SMTP_FROM', '"FacilPay" <noreply@facilpay.com>'),
+      to, subject: 'Sign in to FacilPay',
+      text: 'Sign in: ' + url + '. This link can be used once and expires in 15 minutes.',
+      html: '<p><a href="' + escapeHtml(url) + '">Sign in to FacilPay</a></p><p>This link can be used once and expires in 15 minutes. Ignore this email if you did not request it.</p>',
+    });
+  }
+
   async sendVerificationEmail(to: string, token: string): Promise<void> {
     const appUrl = this.configService.get<string>(
       'APP_URL',

@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CURRENT_API_VERSION } from '../payload-serializers/registry';
+import { encryptedHeadersTransformer } from '../header-security';
 
 export const WEBHOOK_EVENT_TYPES = [
   'payment.created',
@@ -28,6 +29,22 @@ export const WEBHOOK_EVENT_TYPES = [
   'settlement.completed',
   'settlement.failed',
   'recurring.trial_ending',
+  'recurring.charge_succeeded',
+  'recurring.charge_failed',
+  'recurring.paused',
+  'recurring.cancelled',
+  'payout.created',
+  'payout.completed',
+  'payout.failed',
+  'invoice.sent',
+  'invoice.paid',
+  'invoice.overdue',
+  'invoice.voided',
+  'customer.created',
+  'customer.updated',
+  'customer.deleted',
+  'checkout.session.completed',
+  'checkout.session.expired',
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
@@ -35,6 +52,10 @@ export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 @Entity('webhook_endpoints')
 @Index('idx_webhook_endpoints_merchant', ['merchantId'])
 export class WebhookEndpoint {
+  @Column({ type: 'jsonb', nullable: true, transformer: encryptedHeadersTransformer })
+  @ApiPropertyOptional({ description: 'Custom delivery headers; values are masked in responses' })
+  headers: Record<string, string> | null;
+
   @PrimaryGeneratedColumn('uuid')
   @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
   id: string;
@@ -61,6 +82,18 @@ export class WebhookEndpoint {
     example: 'whsec_abc123...',
   })
   secret: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  previousSecret: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  @ApiPropertyOptional({
+    description:
+      'While in the future, deliveries are also signed with the previous secret',
+    example: '2026-01-27T10:00:00.000Z',
+    nullable: true,
+  })
+  previousSecretExpiresAt: Date | null;
 
   @Column({ type: 'int', default: 0 })
   consecutiveFailures: number;

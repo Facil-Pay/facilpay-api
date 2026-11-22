@@ -23,6 +23,11 @@ import {
   ApiNoContentResponse,
 } from '@nestjs/swagger';
 import { StellarService } from './stellar.service';
+import {
+  PathQuoteMode,
+  PathQuoteResult,
+  StellarHorizonClientService,
+} from './stellar-horizon-client.service';
 import { SignTransactionDto } from './dto/sign-transaction.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
 import { AddTrustlineDto } from './dto/add-trustline.dto';
@@ -38,7 +43,31 @@ import { User } from '../users/user.entity';
 @UseGuards(JwtAuthGuard)
 @Controller('v1/stellar')
 export class StellarController {
-  constructor(private readonly stellarService: StellarService) {}
+  constructor(
+    private readonly stellarService: StellarService,
+    private readonly horizonClientService: StellarHorizonClientService,
+  ) {}
+
+  @Get('paths')
+  @ApiOperation({
+    summary: 'Quote a Stellar path payment',
+    description:
+      'Returns the best Horizon path and a route-spread slippage estimate. Assets use XLM for native lumens or CODE:ISSUER for issued assets. The estimate compares the best quote with the next-best Horizon path and is unavailable when only one path is returned.',
+  })
+  @ApiQuery({ name: 'sourceAsset', required: true, example: 'USDC:GISSUER...' })
+  @ApiQuery({ name: 'destAsset', required: true, example: 'XLM' })
+  @ApiQuery({ name: 'amount', required: true, example: '10.00' })
+  @ApiQuery({ name: 'mode', required: true, enum: ['strict-send', 'strict-receive'] })
+  @ApiOkResponse({ description: 'Best available path-payment quote.' })
+  @ApiBadRequestResponse({ description: 'Invalid mode, amount, asset code, or issuer.' })
+  async quotePath(
+    @Query('sourceAsset') sourceAsset: string,
+    @Query('destAsset') destAsset: string,
+    @Query('amount') amount: string,
+    @Query('mode') mode: PathQuoteMode,
+  ): Promise<PathQuoteResult> {
+    return this.horizonClientService.getPathQuote(sourceAsset, destAsset, amount, mode);
+  }
 
   @Get('transactions')
   @ApiOperation({

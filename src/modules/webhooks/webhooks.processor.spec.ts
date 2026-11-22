@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { HttpService } from '@nestjs/axios';
+import { WebhooksService } from './webhooks.service';
 import { WebhooksProcessor } from './webhooks.processor';
 import { WebhookDelivery, WebhookDeliveryStatus } from './entities/webhook-delivery.entity';
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
@@ -40,6 +41,7 @@ describe('WebhooksProcessor', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhooksProcessor,
+        { provide: WebhooksService, useValue: { recordDeliverySuccess: jest.fn(), recordDeliveryFailure: jest.fn() } },
         { provide: getRepositoryToken(WebhookDelivery), useValue: deliveryRepo },
         { provide: getRepositoryToken(WebhookEndpoint), useValue: endpointRepo },
         { provide: HttpService, useValue: httpService },

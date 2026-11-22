@@ -2,8 +2,14 @@ import { IsUrl, IsArray, ArrayNotEmpty, IsEnum, ArrayUnique, IsOptional, IsStrin
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WEBHOOK_EVENT_TYPES, WebhookEventType } from '../entities/webhook-endpoint.entity';
 import { SUPPORTED_API_VERSIONS, CURRENT_API_VERSION } from '../payload-serializers/registry';
+import { IsObject } from 'class-validator';
 
 export class CreateWebhookEndpointDto {
+  @IsOptional()
+  @IsObject()
+  @ApiPropertyOptional({ description: 'Custom static headers. Reserved transport and signature headers are rejected. Use {} to clear.' })
+  headers?: Record<string, string>;
+
   @IsUrl({ protocols: ['https'], require_protocol: true }, { message: 'url must be a valid HTTPS URL' })
   @ApiProperty({
     description: 'HTTPS URL that will receive webhook POST requests',

@@ -1,0 +1,79 @@
+﻿npm.cmd : npm warn ERESOLVE overriding peer dependency
+At line:1 char:1
++ & "C:\Program Files\nodejs\npm.cmd" install 2>&1 | Out-File -FilePath ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn ERESOL...peer dependency 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+npm warn While resolving: nunjucks@3.2.4
+npm warn Found: chokidar@undefined
+npm warn node_modules/@nestjs-modules/mailer/node_modules/chokidar
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional chokidar@"^3.3.0" from nunjucks@3.2.4
+npm warn node_modules/@nestjs-modules/mailer/node_modules/nunjucks
+npm warn   optional nunjucks@"^3.2.4" from @nestjs-modules/mailer@2.3.7
+npm warn   node_modules/@nestjs-modules/mailer
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks 
+memory. Do not use it. Check out lru-cache if you want a good and tested way 
+to coalesce async requests by a key value, which is much more comprehensive 
+and powerful.
+npm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer 
+supported
+npm warn deprecated glob@7.2.3: Glob versions prior to v9 are no longer 
+supported
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and 
+contain widely publicized security vulnerabilities, which have been fixed in 
+the current version. Please update. Support for old versions may be purchased 
+(at exorbitant rates) by contacting i@izs.me
+npm warn cleanup Failed to remove some directories [
+npm warn cleanup   [
+npm warn cleanup     
+'\\\\?\\C:\\Users\\USER\\Desktop\\facilpay-api2\\node_modules\\rxjs',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 
+'C:\Users\USER\Desktop\facilpay-api2\node_modules\rxjs\dist\cjs\internal'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\USER\\Desktop\\facilpay-api2\\node_mod
+ules\\rxjs\\dist\\cjs\\internal'
+npm warn cleanup     }
+npm warn cleanup   ],
+npm warn cleanup   [
+npm warn cleanup     
+'\\\\?\\C:\\Users\\USER\\Desktop\\facilpay-api2\\node_modules',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'C:\Users\US
+ER\Desktop\facilpay-api2\node_modules\@angular-devkit\.schematics-il9ZLCgo\node
+_modules\rxjs\dist\cjs\operators'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\USER\\Desktop\\facilpay-api2\\node_mod
+ules\\@angular-devkit\\.schematics-il9ZLCgo\\node_modules\\rxjs\\dist\\cjs\\ope
+rators'
+npm warn cleanup     }
+npm warn cleanup   ],
+npm warn cleanup   [
+npm warn cleanup     '\\\\?\\C:\\Users\\USER\\Desktop\\facilpay-api2\\node_modu
+les\\@angular-devkit',
+npm warn cleanup     [Error: EPERM: operation not permitted, rmdir 'C:\Users\US
+ER\Desktop\facilpay-api2\node_modules\@angular-devkit\.core-yTfVa6Fi\node_modul
+es\rxjs\src\internal\observable'] {
+npm warn cleanup       errno: -4048,
+npm warn cleanup       code: 'EPERM',
+npm warn cleanup       syscall: 'rmdir',
+npm warn cleanup       path: 'C:\\Users\\USER\\Desktop\\facilpay-api2\\node_mod
+ules\\@angular-devkit\\.core-yTfVa6Fi\\node_modules\\rxjs\\src\\internal\\obser
+vable'
+npm warn cleanup     }
+npm warn cleanup   ]
+npm warn cleanup ]
+npm error code UNABLE_TO_VERIFY_LEAF_SIGNATURE
+npm error errno UNABLE_TO_VERIFY_LEAF_SIGNATURE
+npm error request to 
+https://registry.npmjs.org/@peculiar/asn1-pfx/-/asn1-pfx-2.10.0.tgz failed, 
+reason: unable to verify the first certificate; if the root CA is installed 
+locally, try running Node.js with --use-system-ca
+npm error A complete log of this run can be found in: C:\Users\USER\AppData\Loc
+al\npm-cache\_logs\2026-10-21T14_12_51_137Z-debug-0.log

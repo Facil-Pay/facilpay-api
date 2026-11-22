@@ -1,17 +1,21 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
+  ApiProduces,
   ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { LedgerService } from './ledger.service';
 import { GetLedgerEntriesDto } from './dto/get-ledger-entries.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
+import { BalanceHistoryDto } from './dto/balance-history.dto';
 
 @ApiTags('ledger')
 @ApiBearerAuth('bearer')
@@ -19,6 +23,12 @@ import { User } from '../users/user.entity';
 @Controller('v1/merchants/me')
 export class LedgerController {
   constructor(private readonly ledgerService: LedgerService) {}
+
+  @Get('balance/history')
+  @ApiOperation({ summary: 'Daily closing available balances in the merchant timezone (cached 60 seconds)' })
+  getHistory(@CurrentUser() user: User, @Query() dto: BalanceHistoryDto) {
+    return this.ledgerService.getHistory(user.id, dto);
+  }
 
   @Get('balance')
   @ApiOperation({
@@ -50,8 +60,12 @@ export class LedgerController {
   @ApiOperation({
     summary: 'List merchant ledger entries',
     description:
-      'Returns immutable ledger entries for the authenticated merchant, newest first, with optional filters and pagination.',
+      'Returns immutable ledger entries for the authenticated merchant, newest first, with optional filters and pagination. ' +
+      'Pass `format=csv` with `from` and `to` to download the range as CSV instead (oldest first, columns: ' +
+      'id, createdAt, currency, account, amount, referenceType, referenceId, transactionId). ' +
+      'Ranges of more than 5000 entries are refused; run those as a background job with `POST /v1/exports` and `resource: "ledger"`.',
   })
+  @ApiProduces('application/json', 'text/csv')
   @ApiOkResponse({
     description: 'Paginated ledger entries.',
     schema: {
@@ -75,8 +89,24 @@ export class LedgerController {
       },
     },
   })
+  @ApiBadRequestResponse({
+    description:
+      'For `format=csv`: `from` or `to` missing, `from` after `to`, or the range holds more than 5000 entries.',
+  })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
-  findLedger(@CurrentUser() user: User, @Query() dto: GetLedgerEntriesDto) {
+  async findLedger(
+    @CurrentUser() user: User,
+    @Query() dto: GetLedgerEntriesDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    if (dto.format === 'csv') {
+      const csv = await this.ledgerService.exportCsv(user.id, dto);
+      res.set({
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="ledger-export.csv"',
+      });
+      return csv;
+    }
     return this.ledgerService.findLedger(user.id, dto);
   }
 }

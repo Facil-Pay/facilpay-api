@@ -23,6 +23,8 @@ import { DisputesService } from './disputes.service';
 import { DisputeEvidenceService } from './dispute-evidence.service';
 import { CreateDisputeDto } from './dto/create-dispute.dto';
 import { UpdateDisputeDto } from './dto/update-dispute.dto';
+import { AcceptDisputeDto } from './dto/accept-dispute.dto';
+import { GetDisputeStatsDto } from './dto/get-dispute-stats.dto';
 import { Dispute, DisputeStatus } from './dispute.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -155,6 +157,47 @@ export class DisputesController {
     return this.disputesService.findAll(query.status, query.paymentId);
   }
 
+  @Get('disputes/stats')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Get merchant dispute statistics',
+    description:
+      'Returns merchant-scoped open count, amount at risk, win rate and average resolution time, aggregated via SQL over optional date ranges and grouped by reason code.',
+  })
+  @ApiOkResponse({
+    description: 'Aggregated dispute statistics.',
+    schema: {
+      example: {
+        openCount: 3,
+        amountAtRisk: '250.00',
+        winRate: 0.5,
+        averageResolutionTimeHours: 36.5,
+        total: 10,
+        byReason: [{ reason: 'fraud', count: 4, amount: '400.00' }],
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Invalid date range or filters.',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'from must be before or equal to to',
+        error: 'Bad Request',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error.',
+    schema: {
+      example: { statusCode: 500, message: 'Internal server error' },
+    },
+  })
+  async getStats(@Query() query: GetDisputeStatsDto, @Request() req: any) {
+    return this.disputesService.getStats(req.user?.id ?? req.user?.sub, query);
+  }
+
   @Get('disputes/:id')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('bearer')
@@ -273,6 +316,84 @@ export class DisputesController {
   })
   async update(@Param('id') id: string, @Body() updateDisputeDto: UpdateDisputeDto) {
     return this.disputesService.update(id, updateDisputeDto);
+  }
+
+  @Post('disputes/:id/accept')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.OK)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Accept (concede) an open dispute',
+    description:
+      'Allows a merchant to concede an open dispute without submitting evidence. Moves the dispute to resolved (lost/accepted), triggers the refund flow for the disputed amount, and emits dispute.resolved.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Dispute UUID',
+    example: '789e4567-e89b-12d3-a456-426614174000',
+  })
+  @ApiBody({ type: AcceptDisputeDto })
+  @ApiOkResponse({
+    description: 'Dispute accepted and resolved as lost.',
+    type: Dispute,
+    schema: {
+      example: {
+        id: '789e4567-e89b-12d3-a456-426614174000',
+        paymentId: '123e4567-e89b-12d3-a456-426614174000',
+        status: 'resolved',
+        reason: 'fraud',
+        resolutionNotes: 'Dispute accepted by merchant - conceded without evidence',
+        resolvedBy: 'merchant@example.com',
+        resolvedAt: '2026-01-27T12:00:00.000Z',
+      },
+    },
+  })
+  @ApiBadRequestResponse({
+    description: 'Validation failed.',
+    schema: {
+      example: {
+        statusCode: 400,
+        message: 'Resolution notes must not exceed 2000 characters',
+        error: 'Bad Request',
+      },
+    },
+  })
+  @ApiNotFoundResponse({
+    description: 'Dispute not found.',
+    schema: {
+      example: {
+        statusCode: 404,
+        message: 'Dispute with ID 789e4567-e89b-12d3-a456-426614174000 not found',
+        error: 'Not Found',
+      },
+    },
+  })
+  @ApiConflictResponse({
+    description: 'Dispute cannot be accepted in its current status.',
+    schema: {
+      example: {
+        statusCode: 409,
+        message: 'Only open, under_review or escalated disputes can be accepted. Current status: resolved',
+        error: 'Conflict',
+      },
+    },
+  })
+  @ApiInternalServerErrorResponse({
+    description: 'Internal server error.',
+    schema: {
+      example: { statusCode: 500, message: 'Internal server error' },
+    },
+  })
+  async accept(
+    @Param('id') id: string,
+    @Body() acceptDisputeDto: AcceptDisputeDto,
+    @Request() req: any,
+  ) {
+    return this.disputesService.accept(
+      id,
+      acceptDisputeDto,
+      req.user?.id ?? req.user?.sub,
+    );
   }
 
   // ── Evidence endpoints ────────────────────────────────────────────────────

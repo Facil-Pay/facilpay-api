@@ -190,4 +190,44 @@ describe('PaymentsService — maker-checker refund approval', () => {
       expect(result.rejectionReason).toBe('Policy violation');
     });
   });
+
+  describe('listRefunds', () => {
+    it('scopes by merchant, combines filters, and returns paginated results', async () => {
+      const refund = makeMockRefund();
+      const query = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
+        getManyAndCount: jest.fn().mockResolvedValue([[refund], 1]),
+      };
+      refundRepo.createQueryBuilder.mockReturnValue(query);
+
+      const filters = {
+        status: 'EXECUTED',
+        from: '2026-01-01T00:00:00.000Z',
+        to: '2026-01-31T23:59:59.999Z',
+        paymentId: 'payment-uuid',
+        reasonCode: RefundReasonCode.OTHER,
+        page: 2,
+        limit: 5,
+      };
+
+      await expect(service.listRefunds('merchant-uuid', filters)).resolves.toEqual({
+        data: [refund],
+        total: 1,
+        page: 2,
+        limit: 5,
+      });
+      expect(query.where).toHaveBeenCalledWith(
+        'payment.merchantId = :merchantId',
+        { merchantId: 'merchant-uuid' },
+      );
+      expect(query.andWhere).toHaveBeenCalledTimes(5);
+      expect(query.skip).toHaveBeenCalledWith(5);
+      expect(query.take).toHaveBeenCalledWith(5);
+    });
+  });
 });

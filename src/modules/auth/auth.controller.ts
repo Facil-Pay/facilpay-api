@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Post,
   Get,
@@ -14,6 +15,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
+import { RequestMagicLinkDto, VerifyMagicLinkDto } from './dto/magic-link.dto';
+import { extractClientIp } from '../merchants/ip-utils';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { RegisterDto } from '../users/dto/register.dto';
@@ -48,6 +51,10 @@ import { WebAuthnService } from './webauthn.service';
 import { LoginAlertsService } from './login-alerts.service';
 import { LoginAlertPreferenceDto } from './dto/login-alert-preference.dto';
 import { AssignRoleDto } from './dto/assign-role.dto';
+import { GoogleAuthorizeDto, GoogleCallbackDto } from './dto/google.dto';
+import { Sep10ChallengeDto, Sep10TokenDto } from './dto/sep10.dto';
+import { GoogleOidcService } from './google-oidc.service';
+import { Sep10Service } from './sep10.service';
 import {
   ApiBody,
   ApiAcceptedResponse,
@@ -74,7 +81,27 @@ export class AuthController {
     private usersService: UsersService,
     private readonly webAuthnService: WebAuthnService,
     private readonly loginAlertsService: LoginAlertsService,
+    private readonly googleOidcService: GoogleOidcService,
+    private readonly sep10Service: Sep10Service,
   ) {}
+
+  @AuthThrottle()
+  @Public()
+  @Post('magic-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Email a single-use sign-in link valid for 15 minutes' })
+  requestMagicLink(@Body() dto: RequestMagicLinkDto, @Req() req: Request) {
+    return this.authService.requestMagicLink(dto.email, req.ip);
+  }
+
+  @AuthThrottle()
+  @Public()
+  @Post('magic-link/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Redeem a sign-in link; requires a second factor when configured' })
+  verifyMagicLink(@Body() dto: VerifyMagicLinkDto, @Req() req: Request) {
+    return this.authService.verifyMagicLink(dto.token, req.ip, req.headers['user-agent'], dto.deviceId, dto.twoFactorCode);
+  }
 
   @AuthThrottle()
   @Post('register')
@@ -981,5 +1008,122 @@ export class AuthController {
   })
   async assignRole(@Param('id') userId: string, @Body() dto: AssignRoleDto, @CurrentUser() user: User, @Req() req: Request) {
     return this.authService.assignRole(userId, dto.roleId, user.id, req.ip, req.headers['user-agent']);
+  }
+
+  @AuthThrottle()
+  @Public()
+  @Post('google/authorize')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Start Sign in with Google (OIDC + PKCE)',
+    description:
+      'Returns a Google authorization URL with PKCE code_challenge and an opaque state. Fully configurable via GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI and GOOGLE_OIDC_ISSUER.',
+  })
+  @ApiBody({ type: GoogleAuthorizeDto })
+  @ApiOkResponse({
+    description: 'Google authorization URL with PKCE parameters.',
+    schema: {
+      example: {
+        url: 'https://accounts.google.com/o/oauth2/v2/auth?client_id=...&code_challenge=...&state=...',
+        state: 'c9f0f895fb98ab9159f51fd0297e236d',
+        codeVerifier: 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk',
+        codeChallenge: 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM',
+        expiresAt: '2026-01-26T12:10:00.000Z',
+      },
+    },
+  })
+  async googleAuthorize(@Body() dto: GoogleAuthorizeDto) {
+    return this.googleOidcService.buildAuthorizeUrl(dto.redirectUri);
+  }
+
+  @AuthThrottle()
+  @Public()
+  @Post('google/callback')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Complete Sign in with Google',
+    description:
+      'Exchanges the Google authorization code with PKCE code_verifier, verifies the ID token, and links to an existing account only by verified email after explicit confirmation (confirmLink=true). Otherwise creates a new verified account.',
+  })
+  @ApiBody({ type: GoogleCallbackDto })
+  @ApiOkResponse({
+    description: 'Google sign-in successful.',
+    schema: {
+      example: {
+        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refresh_token: '550e8400-e29b-41d4-a716-446655440000',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Google code exchange or ID token verification failed.' })
+  @ApiForbiddenResponse({ description: 'Email not verified or linking not confirmed.' })
+  async googleCallback(@Body() dto: GoogleCallbackDto, @Req() req: Request) {
+    return this.googleOidcService.handleCallback(
+      dto.code,
+      dto.codeVerifier,
+      dto.state,
+      dto.redirectUri,
+      dto.confirmLink,
+      extractClientIp(req as never) ?? (req as unknown as { ip?: string }).ip,
+      (req.headers?.['user-agent'] as string | undefined),
+    );
+  }
+
+  @Public()
+  @Get('sep10/challenge')
+  @ApiOperation({
+    summary: 'SEP-10 Stellar challenge',
+    description:
+      'Returns a replay-protected SEP-10 challenge transaction for the given Stellar account, signed by the server. Sign it with the Stellar account to authenticate via POST /v1/auth/sep10/token.',
+  })
+  @ApiQuery({ name: 'account', required: true, description: 'Stellar public key (G...)' })
+  @ApiQuery({ name: 'homeDomain', required: false, description: 'Optional home domain override' })
+  @ApiOkResponse({
+    description: 'SEP-10 challenge transaction (base64 XDR).',
+    schema: {
+      example: {
+        transaction: 'AAAAAg...',
+        networkPassphrase: 'Test SDF Network ; September 2015',
+        homeDomain: 'auth.facilpay.com',
+        expiresAt: '2026-01-26T12:15:00.000Z',
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: 'Invalid Stellar account or SEP-10 not configured.' })
+  async sep10Challenge(@Query('account') account: string, @Query('homeDomain') homeDomain?: string) {
+    const dto: Sep10ChallengeDto = { account, homeDomain };
+    if (!/^G[A-Z2-7]{55}$/.test(dto.account)) {
+      throw new BadRequestException('account must be a valid Stellar public key (G...)');
+    }
+    return this.sep10Service.buildChallenge(dto.account, dto.homeDomain);
+  }
+
+  @AuthThrottle()
+  @Public()
+  @Post('sep10/token')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'SEP-10 Stellar token',
+    description:
+      'Verifies a signed SEP-10 challenge transaction (replay-protected via time bounds and single-use nonce, requiring both server and client signatures) and binds it to a user, returning app access and refresh tokens.',
+  })
+  @ApiBody({ type: Sep10TokenDto })
+  @ApiOkResponse({
+    description: 'SEP-10 authentication successful.',
+    schema: {
+      example: {
+        access_token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        refresh_token: '550e8400-e29b-41d4-a716-446655440000',
+        stellarAccount: 'G...',
+      },
+    },
+  })
+  @ApiUnauthorizedResponse({ description: 'Challenge verification failed or challenge already used.' })
+  async sep10Token(@Body() dto: Sep10TokenDto, @Req() req: Request) {
+    return this.sep10Service.verifyChallengeAndLogin(
+      dto.transaction,
+      extractClientIp(req as never) ?? (req as unknown as { ip?: string }).ip,
+      (req.headers?.['user-agent'] as string | undefined),
+    );
   }
 }

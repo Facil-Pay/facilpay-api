@@ -127,6 +127,10 @@ Review the generated SQL, then run it against your local database to verify:
 npm run typeorm -- migration:run
 ```
 
+See [`docs/DATABASE_MIGRATIONS.md`](docs/DATABASE_MIGRATIONS.md) for the full
+workflow, naming/timestamp conventions, and how to write safe data migrations
+and backfills.
+
 ## Pull request checklist
 
 Before requesting review, confirm all of the following. The first four items

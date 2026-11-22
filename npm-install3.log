@@ -1,0 +1,14 @@
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: nunjucks@3.2.4
+npm warn Found: chokidar@undefined
+npm warn node_modules/@nestjs-modules/mailer/node_modules/chokidar
+npm warn
+npm warn Could not resolve dependency:
+npm warn peerOptional chokidar@"^3.3.0" from nunjucks@3.2.4
+npm warn node_modules/@nestjs-modules/mailer/node_modules/nunjucks
+npm warn   optional nunjucks@"^3.2.4" from @nestjs-modules/mailer@2.3.7
+npm warn   node_modules/@nestjs-modules/mailer
+npm error process terminated
+npm error signal SIGINT
+npm error A complete log of this run can be found in: C:\Users\USER\AppData\Local\npm-cache\_logs\2026-10-21T14_21_11_510Z-debug-0.log
+Terminate batch job (Y/N)? 

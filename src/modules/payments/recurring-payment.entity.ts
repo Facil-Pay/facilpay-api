@@ -27,6 +27,12 @@ export class RecurringPayment {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  pendingProrationAmount: number | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  prorationBaseAmount: number | null;
+
   @Column()
   currency: string;
 
@@ -93,6 +99,18 @@ export class RecurringPayment {
 
   @Column({ type: 'int', default: 3 })
   notifyDaysBefore: number;
+
+  @Column({ type: 'boolean', default: true })
+  payerCancellationEnabled: boolean;
+
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  cancelTokenHash: string | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  cancelTokenExpiresAt: Date | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  cancelTokenUsedAt: Date | null;
 
   @Column({ type: 'int', nullable: true })
   lastNotifiedCycle: number | null;

@@ -1,6 +1,13 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class GetCustomersDto {
   @Type(() => Number)
@@ -26,4 +33,15 @@ export class GetCustomersDto {
     example: 'jane',
   })
   search?: string;
+
+  @IsString()
+  @MaxLength(50)
+  @IsOptional()
+  @ApiPropertyOptional({
+    description:
+      'Only return customers carrying this tag (matched case-insensitively)',
+    example: 'vip',
+    maxLength: 50,
+  })
+  tag?: string;
 }

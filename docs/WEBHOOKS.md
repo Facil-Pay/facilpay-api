@@ -6,6 +6,8 @@ FacilPay delivers real-time HTTP POST notifications to merchant-registered endpo
 
 All webhook management endpoints live under `/v1/webhooks` and require a valid JWT.
 
+> **Related:** Every webhook delivery is backed by a persisted event record. You can query, filter, and paginate these records directly via the [Events API](EVENTS.md).
+
 ## Supported Event Types
 
 | Event                    | Fired when                                   |
@@ -27,6 +29,15 @@ All webhook management endpoints live under `/v1/webhooks` and require a valid J
 | `settlement.created`     | A settlement is created                      |
 | `settlement.completed`   | A settlement payout completes successfully   |
 | `settlement.failed`      | A settlement payout fails                    |
+| `invoice.sent`           | An invoice transitions from `DRAFT` to `OPEN` (sent to customer) |
+| `invoice.paid`           | An invoice is marked `PAID` after a linked payment completes    |
+| `invoice.overdue`        | An open invoice passes its due date and becomes `OVERDUE`       |
+| `invoice.voided`         | An invoice is voided (via delete on draft or void on open/overdue) |
+| `customer.created`       | A new customer is created for a merchant                              |
+| `customer.updated`       | An existing customer's details are updated                            |
+| `customer.deleted`       | A customer is soft-deleted                                           |
+| `checkout.session.completed` | A hosted checkout session completes and a payment is created   |
+| `checkout.session.expired`  | A checkout session expires (manually or via the 10-minute cron) |
 
 ## Endpoint Management
 
@@ -170,19 +181,101 @@ Permanently removes the webhook endpoint and cascades to its delivery records.
 POST /v1/webhooks/:id/rotate-secret
 ```
 
-Generates a new `whsec_` signing secret. The previous secret stops validating new deliveries immediately. The new secret is returned exactly once in the response — store it securely.
+Generates a new `whsec_` signing secret. The new secret is returned exactly once in the response — store it securely.
+
+To give you time to deploy the new secret, the previous secret keeps signing deliveries for a **grace period** (24 hours by default). While the period is open every delivery carries two signatures in `X-FacilPay-Signature` — see [Signature Verification](#signature-verification). Once it ends the previous secret is dropped and only the new one signs.
+
+**Request Body (optional)**
+
+```json
+{
+  "gracePeriodHours": 48
+}
+```
+
+| Field              | Type      | Required | Description                                                                                         |
+| ------------------ | --------- | -------- | --------------------------------------------------------------------------------------------------- |
+| `gracePeriodHours` | `integer` | No       | Whole hours, `0`–`168`. Defaults to `24` (override the default with `WEBHOOK_SECRET_GRACE_PERIOD_HOURS`). `0` switches to the new secret immediately. |
+
+Rotating again while a grace period is open starts a new one for the secret that was current at that moment; the older secret stops signing right away.
 
 **Response — `200 OK`**
 
-Returns the full endpoint object with the new `secret`.
+Returns the full endpoint object with the new `secret`. `previousSecretExpiresAt` is the instant the grace period ends (`null` when there is none); the previous secret itself is never returned (`previousSecret` is masked).
+
+```json
+{
+  "id": "123e4567-e89b-12d3-a456-426614174000",
+  "secret": "whsec_newsecret123...",
+  "previousSecret": "********",
+  "previousSecretExpiresAt": "2026-01-27T12:00:00.000Z"
+}
+```
 
 **Error Responses**
 
 | Status | Condition                            |
 | ------ | ------------------------------------ |
+| `400`  | `gracePeriodHours` is not an integer between 0 and 168 |
 | `401`  | Missing or invalid JWT               |
 | `403`  | Endpoint belongs to another merchant |
 | `404`  | Endpoint not found                   |
+
+---
+
+### List Delivery Attempts
+
+```
+GET /v1/webhooks/:id/deliveries
+```
+
+Lists the deliveries for one of your endpoints, newest first, so you can find a failing delivery and retry it by ID.
+
+**Query Parameters**
+
+| Parameter   | Type     | Description                                                        |
+| ----------- | -------- | ------------------------------------------------------------------ |
+| `page`      | `int`    | Page number (default `1`)                                          |
+| `limit`     | `int`    | Items per page (default `20`, max `100`)                           |
+| `status`    | `string` | `pending`, `success`, `failed` or `dead-letter`                    |
+| `eventType` | `string` | Only deliveries for this event, e.g. `payment.completed`           |
+| `from`      | ISO 8601 | Only deliveries created at or after this time                      |
+| `to`        | ISO 8601 | Only deliveries created at or before this time                     |
+
+**Response — `200 OK`**
+
+```json
+{
+  "data": [
+    {
+      "id": "5f0c7a3e-6b52-4f4e-9d3b-0d6f1c2f9a10",
+      "eventType": "payment.completed",
+      "status": "failed",
+      "attempts": 2,
+      "responseCode": 500,
+      "latencyMs": 182,
+      "responseBody": "{\"error\":\"upstream timeout\"}",
+      "error": "Request failed with status code 500",
+      "lastAttemptAt": "2026-01-26T10:00:05.000Z",
+      "createdAt": "2026-01-26T10:00:00.000Z"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "limit": 20
+}
+```
+
+`responseCode`, `latencyMs` and `responseBody` describe the latest attempt and are `null` until one has been made (or when the endpoint could not be reached). `responseBody` is cut to its first 1024 characters. Deliveries made before this field existed have no stored body.
+
+**Error Responses**
+
+| Status | Condition                                     |
+| ------ | --------------------------------------------- |
+| `400`  | Invalid filter, or `from` is after `to`       |
+| `401`  | Missing or invalid JWT                        |
+| `403`  | Endpoint belongs to another merchant          |
+| `404`  | Endpoint not found                            |
 
 ## Payload Envelope
 
@@ -243,6 +336,99 @@ Refund lifecycle events use this payload shape:
 }
 ```
 
+### Invoice Lifecycle Payloads
+
+All four `invoice.*` events share the same payload shape — the `status` field reflects the new state:
+
+```json
+{
+  "event": "invoice.sent",
+  "timestamp": "2026-01-26T10:05:00.000Z",
+  "data": {
+    "invoiceId": "123e4567-e89b-12d3-a456-426614174000",
+    "number": "INV-000001",
+    "customerEmail": "buyer@example.com",
+    "customerName": "Buyer",
+    "currency": "USD",
+    "subtotal": "100.00",
+    "taxRate": "10.00",
+    "taxAmount": "10.00",
+    "total": "110.00",
+    "dueDate": "2030-01-01T00:00:00.000Z",
+    "status": "OPEN",
+    "paymentId": null,
+    "lineItems": [
+      {
+        "description": "Consulting",
+        "quantity": "2",
+        "unitPrice": "50.00",
+        "amount": "100.00",
+        "productId": null
+      }
+    ]
+  }
+}
+```
+
+| Event             | `status` value | Fired when                                                        |
+| ----------------- | -------------- | ----------------------------------------------------------------- |
+| `invoice.sent`    | `OPEN`         | `POST /v1/invoices/:id/send` transitions a draft invoice to open |
+| `invoice.paid`    | `PAID`         | A linked payment completes and marks the invoice paid            |
+| `invoice.overdue` | `OVERDUE`      | An open invoice passes its due date (lazy on read or daily cron) |
+| `invoice.voided`  | `VOID`         | `DELETE /v1/invoices/:id` (draft) or `POST /v1/invoices/:id/void` |
+
+### Customer Lifecycle Payloads
+
+All three `customer.*` events share the same payload shape:
+
+```json
+{
+  "event": "customer.created",
+  "timestamp": "2026-01-26T10:05:00.000Z",
+  "data": {
+    "customerId": "123e4567-e89b-12d3-a456-426614174000",
+    "merchantId": "abc123-merchant-uuid",
+    "email": "buyer@example.com",
+    "name": "Jane Doe",
+    "phone": "+1234567890",
+    "metadata": { "tier": "gold" },
+    "createdAt": "2026-01-26T10:00:00.000Z",
+    "updatedAt": "2026-01-26T10:05:00.000Z"
+  }
+}
+```
+
+| Event               | Fired when                                            |
+| ------------------- | ---------------------------------------------------- |
+| `customer.created`  | `POST /v1/customers` creates a new customer          |
+| `customer.updated`  | `PATCH /v1/customers/:id` updates customer details   |
+| `customer.deleted`  | `DELETE /v1/customers/:id` soft-deletes a customer   |
+
+### Checkout Session Payloads
+
+Both `checkout.session.*` events use a lightweight payload referencing the session and (for completion) the resulting payment:
+
+```json
+{
+  "event": "checkout.session.completed",
+  "timestamp": "2026-01-26T10:05:00.000Z",
+  "data": {
+    "sessionId": "123e4567-e89b-12d3-a456-426614174000",
+    "publicId": "abc123def456ghi789jkl012",
+    "paymentId": "pay_abc123",
+    "completedAt": "2026-01-26T10:05:00.000Z",
+    "customerEmail": "buyer@example.com"
+  }
+}
+```
+
+| Event                       | Fired when                                                    |
+| --------------------------- | ------------------------------------------------------------ |
+| `checkout.session.completed` | `POST /v1/checkout/sessions/:publicId/complete` creates a payment and marks the session `COMPLETE` |
+| `checkout.session.expired`  | Manual `POST /v1/checkout/sessions/:id/expire` or the 10-minute cron marks an `OPEN` session `EXPIRED` |
+
+The `expired` payload replaces `paymentId`/`completedAt`/`customerEmail` with `expiredAt`.
+
 ## Request Headers
 
 Every delivery includes these headers:
@@ -251,7 +437,7 @@ Every delivery includes these headers:
 | ----------------------- | ------------------------------------------------------------------------------- |
 | `Content-Type`          | Always `application/json`                                                       |
 | `X-FacilPay-Event`      | The event name (e.g. `payment.completed`)                                       |
-| `X-FacilPay-Signature`  | Hex-encoded HMAC-SHA256 of the raw JSON body, keyed with the endpoint's `secret` |
+| `X-FacilPay-Signature`  | Hex-encoded HMAC-SHA256 of the raw JSON body, keyed with the endpoint's `secret`. During a [secret rotation](#rotate-signing-secret) grace period: two comma-separated digests, new secret first |
 
 ## Signature Verification
 
@@ -262,29 +448,38 @@ FacilPay signs every delivery so you can verify that it came from us and wasn't 
 1. The raw JSON body is serialized with `JSON.stringify(payload)`.
 2. An HMAC-SHA256 digest is computed using the endpoint's `secret` (the `whsec_...` value returned at creation) as the key.
 3. The hex-encoded result is sent in the `X-FacilPay-Signature` header.
+4. While a secret rotation grace period is open, the header holds one digest per active secret, separated by commas and newest secret first (`<digest for new secret>,<digest for previous secret>`). Treat the delivery as authentic if **any** of them matches the digest you compute with a secret you hold. Outside a grace period the header is a single digest.
+
+Because of step 4, split the header on `,` before comparing. A verifier that compares the whole header to a single digest rejects deliveries during the grace period.
 
 ### Verifying in Node.js
 
 ```javascript
 const crypto = require('crypto');
 
-function verifyWebhook(rawBody, signature, secret) {
+function verifyWebhook(rawBody, signatureHeader, secret) {
   const expected = crypto
     .createHmac('sha256', secret)
     .update(rawBody)
-    .digest('hex');
+    .digest();
 
-  // Use constant-time comparison to prevent timing attacks
-  return crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expected, 'hex'),
-  );
+  // The header holds several comma-separated digests during a secret rotation.
+  return String(signatureHeader)
+    .split(',')
+    .some((signature) => {
+      const candidate = Buffer.from(signature.trim(), 'hex');
+      // timingSafeEqual throws on different lengths, and keeps the comparison constant-time
+      return (
+        candidate.length === expected.length &&
+        crypto.timingSafeEqual(candidate, expected)
+      );
+    });
 }
 
 // In your Express handler:
 app.post('/webhooks', express.text({ type: 'application/json' }), (req, res) => {
-  const signature = req.headers['x-facilpay-signature'];
-  const isValid = verifyWebhook(req.body, signature, process.env.WEBHOOK_SECRET);
+  const signatureHeader = req.headers['x-facilpay-signature'];
+  const isValid = verifyWebhook(req.body, signatureHeader, process.env.WEBHOOK_SECRET);
 
   if (!isValid) {
     return res.status(401).send('Invalid signature');
@@ -301,13 +496,17 @@ app.post('/webhooks', express.text({ type: 'application/json' }), (req, res) => 
 import hmac
 import hashlib
 
-def verify_webhook(raw_body: bytes, signature: str, secret: str) -> bool:
+def verify_webhook(raw_body: bytes, signature_header: str, secret: str) -> bool:
     expected = hmac.new(
         secret.encode(),
         raw_body,
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    # The header holds several comma-separated digests during a secret rotation.
+    return any(
+        hmac.compare_digest(signature.strip(), expected)
+        for signature in signature_header.split(',')
+    )
 ```
 
 > **Security note:** Always use constant-time comparison (`crypto.timingSafeEqual` / `hmac.compare_digest`) to prevent timing attacks. Do **not** use `===` or `==` for signature comparison.
@@ -439,7 +638,7 @@ The test delivery goes through the same BullMQ pipeline (including signature and
 2. **Verify the signature.** Compute HMAC-SHA256 of the raw request body with your endpoint secret and compare against `X-FacilPay-Signature` using constant-time comparison.
 3. **Route on the event.** Use the `event` field (or the `X-FacilPay-Event` header) to dispatch to the appropriate handler.
 4. **Deduplicate.** If your handler is not idempotent, track delivery IDs or data identifiers to avoid processing the same event twice (retries will re-deliver the same payload).
-5. **Handle secret rotation gracefully.** During rotation, briefly accept signatures from both old and new secrets to avoid rejecting in-flight deliveries.
+5. **Handle secret rotation gracefully.** Make your verifier split `X-FacilPay-Signature` on commas and accept any matching digest *before* you rotate. During the grace period FacilPay signs with both the old and the new secret, so you can deploy the new one without rejecting deliveries.
 6. **Monitor dead letters.** Set up alerts for deliveries that reach `dead-letter` status — they indicate persistent connectivity or server issues on your end.
 
 ## Authentication & Permissions

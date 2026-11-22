@@ -216,6 +216,7 @@ Environment variables:
 - [Refunds](docs/REFUNDS.md) — refund system and maker-checker approval flow
 - [Disputes](docs/DISPUTES.md) — dispute lifecycle and evidence uploads
 - [Webhooks](docs/WEBHOOKS.md) — webhook endpoints and event types
+- [Events](docs/EVENTS.md) — Events API, event object schema, filters, and pagination
 - [RBAC](docs/RBAC.md) — role-based access control
 - [Audit Log](docs/AUDIT_LOG.md) — audit logging
 - [Settlements](docs/SETTLEMENTS.md) — settlement processing
@@ -228,5 +229,421 @@ Environment variables:
 - [Rates](docs/RATES.md) — currency rates and conversion
 - [Stellar](docs/STELLAR.md) — Stellar network integration
 - [Two-Factor Auth](docs/TWO_FACTOR_AUTH.md) — 2FA implementation
+- [WebAuthn](docs/WEBAUTHN.md) — passkey registration and authentication
 - [Password Reset](docs/PASSWORD_RESET.md) — password reset flow
+- [Customers](docs/CUSTOMERS.md) — customer CRUD and payment history
+- [Checkout Sessions](docs/CHECKOUT_SESSIONS.md) — hosted checkout sessions
+- [Exports](docs/EXPORTS.md) — background export jobs
+- [Notifications](docs/NOTIFICATIONS.md) — in-app notification centre and email preferences
 - [Environment](docs/ENVIRONMENT.md) — environment variable reference
+
+## Handsoff notes
+
+<!-- handsoff-issue-511 -->
+- #511: Add global search endpoint GET /v1/search
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.
+
+# Invoice schedules
+
+Invoice schedules automatically create and send invoices at
+configured intervals.
+
+Unlike recurring payments, invoice schedules generate invoices
+for customers instead of automatically charging them.
+
+## Create a schedule
+
+POST /v1/invoice-schedules
+
+{
+  "customerId": "customer-uuid",
+  "lineItems": [
+    {
+      "description": "Monthly service",
+      "quantity": 1,
+      "unitAmount": 250000,
+      "currency": "NGN"
+    }
+  ],
+  "interval": "monthly",
+  "startAt": "2026-12-01T00:00:00.000Z",
+  "endAt": "2027-12-01T00:00:00.000Z",
+  "timezone": "Africa/Lagos"
+}
+
+## Pause a schedule
+
+PATCH /v1/invoice-schedules/:id/pause
+
+## Resume a schedule
+
+PATCH /v1/invoice-schedules/:id/resume
+
+## Cancel a schedule
+
+DELETE /v1/invoice-schedules/:id
+
+Cancellation prevents future invoices from being generated.
+Invoices already created remain available.
+
+## Events
+
+The platform emits:
+
+invoice_schedule.invoice_created
+
+The event contains the schedule ID, invoice ID, customer ID,
+and billing period.
+
+## Duplicate prevention
+
+Each schedule period has a unique occurrence record.
+Repeated cron execution or application restarts must not
+create a duplicate invoice for the same period.

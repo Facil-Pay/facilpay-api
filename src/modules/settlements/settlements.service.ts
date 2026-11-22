@@ -1,6 +1,16 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository, DataSource } from 'typeorm';
+import { In, Repository, DataSource, EntityManager } from 'typeorm';
+import { PayoutDestination } from './entities/payout-destination.entity';
+import { CreatePayoutDestinationDto } from './dto/create-payout-destination.dto';
+import { VerifyPayoutDestinationDto } from './dto/verify-payout-destination.dto';
+import { Refund, RefundStatus } from '../payments/refund.entity';
+import { AuthService } from '../auth/auth.service';
+import { StellarService } from '../stellar/stellar.service';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { createHash, randomBytes } from 'crypto';
+import { LedgerAccount, LedgerReferenceType } from '../ledger/ledger-entry.entity';
+import { appendLedgerTransaction } from '../ledger/ledger-transaction';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { Settlement } from './entities/settlement.entity';
@@ -21,6 +31,16 @@ import {
 } from '../../common/interfaces/paginated-result.interface';
 import { EventsService } from '../events/events.service';
 import { SettlementStatus } from './entities/settlement.entity';
+
+interface SettlementStatementRow {
+  paymentId: string;
+  reference: string | null;
+  gross: number;
+  fee: number;
+  net: number;
+  refunds: number;
+  adjustments: number;
+}
 
 @Injectable()
 export class SettlementsService {
@@ -46,6 +66,9 @@ export class SettlementsService {
     private readonly configService: ConfigService,
     private readonly webhooksService: WebhooksService,
     private readonly eventsService: EventsService,
+    private readonly authService: AuthService,
+    private readonly stellarService: StellarService,
+    private readonly auditLogsService: AuditLogsService,
   ) {
     this.settleOnGross =
       String(
@@ -54,6 +77,46 @@ export class SettlementsService {
           'false',
         ),
       ).toLowerCase() === 'true';
+  }
+
+  async preview(merchantId: string) {
+    return this.dataSource.transaction('REPEATABLE READ', async manager => {
+      const configs = await manager.find(MerchantSettlementConfig, { where: { userId: merchantId } });
+      const previews: Array<Record<string, unknown>> = [];
+      for (const config of configs) {
+        const calculation = await this.calculateSettlement(manager, config);
+        const next = new Date();
+        next.setUTCHours(0, 0, 0, 0);
+        if (config.schedule === SettlementSchedule.MONTHLY) next.setUTCMonth(next.getUTCMonth() + 1, 1);
+        else next.setUTCDate(next.getUTCDate() + (config.schedule === SettlementSchedule.WEEKLY ? 7 - next.getUTCDay() : 1));
+        previews.push({ currency: config.currency, schedule: config.schedule, nextSettlementAt: next, ...calculation, payments: undefined });
+      }
+      return { previews };
+    });
+  }
+
+  private async calculateSettlement(manager: EntityManager, config: MerchantSettlementConfig) {
+    const payments = await manager.createQueryBuilder(Payment, 'p')
+      .where('p.status IN (:...statuses)', { statuses: [PaymentStatus.COMPLETED, PaymentStatus.PARTIALLY_REFUNDED, PaymentStatus.REFUNDED] })
+      .andWhere('p.merchantId = :merchantId', { merchantId: config.userId })
+      .andWhere('p.currency = :currency', { currency: config.currency })
+      .andWhere('p.settlementId IS NULL')
+      .getMany();
+    const refunds = payments.length ? await manager.find(Refund, {
+      where: { paymentId: In(payments.map(p => p.id)), status: In([RefundStatus.PENDING, RefundStatus.CLAIMABLE, 'PENDING_APPROVAL' as RefundStatus]) },
+    }) : [];
+    const grossAmount = payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const fees = payments.reduce((sum, p) => sum + Number(p.feeAmount || 0), 0);
+    const pendingRefunds = refunds.reduce((sum, r) => sum + Number(r.amount), 0);
+    // PENDING/CLAIMABLE transfers already increment payment.refundedAmount.
+    // Only approvals awaiting execution require an additional holdback.
+    const approvalHoldback = refunds.filter(r => String(r.status) === 'PENDING_APPROVAL').reduce((sum, r) => sum + Number(r.amount), 0);
+    const completedRefunds = payments.reduce((sum, p) => sum + Number(p.refundedAmount || 0), 0);
+    const base = payments.reduce((sum, p) => sum + Number(this.settleOnGross ? p.amount : (p.netAmount ?? (Number(p.amount) - Number(p.feeAmount || 0)))), 0);
+    const round = (amount: number) => Math.round((amount + Number.EPSILON) * 100) / 100;
+    const totalAmount = round(Math.max(0, base - completedRefunds - approvalHoldback));
+    const reservedAmount = round(totalAmount * Number(config.reservePercent || 0) / 100);
+    return { payments, paymentCount: payments.length, grossAmount: round(grossAmount), fees: round(fees), pendingRefunds: round(pendingRefunds), completedRefunds: round(completedRefunds), totalAmount, reservedAmount, netAmount: round(totalAmount - reservedAmount) };
   }
 
   async listPayoutDestinations(merchantId: string): Promise<PayoutDestination[]> {
@@ -405,17 +468,17 @@ export class SettlementsService {
     };
   }
 
-  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: 'UTC' })
   async runDailySettlements(): Promise<void> {
     await this.processSettlementsForSchedule(SettlementSchedule.DAILY);
   }
 
-  @Cron('0 0 * * 0')
+  @Cron('0 0 * * 0', { timeZone: 'UTC' })
   async runWeeklySettlements(): Promise<void> {
     await this.processSettlementsForSchedule(SettlementSchedule.WEEKLY);
   }
 
-  @Cron('0 0 1 * *')
+  @Cron('0 0 1 * *', { timeZone: 'UTC' })
   async runMonthlySettlements(): Promise<void> {
     await this.processSettlementsForSchedule(SettlementSchedule.MONTHLY);
   }
@@ -588,41 +651,13 @@ export class SettlementsService {
         lockedConfig.currency,
       );
 
-      // Use the fresh config value with the lock acquired
-      const since = lockedConfig.lastSettledAt ?? new Date(0);
-
-      const completedPayments = await queryRunner.manager
-        .createQueryBuilder(Payment, 'p')
-        .where('p.status = :status', { status: PaymentStatus.COMPLETED })
-        .andWhere('p.merchantId = :merchantId', { merchantId: lockedConfig.userId })
-        .andWhere('p.currency = :currency', { currency: lockedConfig.currency })
-        .andWhere('p.updatedAt > :since', { since })
-        .getMany();
-
-      if (completedPayments.length === 0) {
+      const calculation = await this.calculateSettlement(queryRunner.manager, lockedConfig);
+      const { payments: completedPayments, totalAmount, reservedAmount, netAmount } = calculation;
+      if (completedPayments.length === 0 || totalAmount <= 0) {
         await queryRunner.rollbackTransaction();
         return null;
       }
-
-      const totalAmount = completedPayments.reduce(
-        (sum, p) =>
-          sum +
-          Number(
-            this.settleOnGross
-              ? p.amount
-              : p.netAmount !== undefined && p.netAmount !== null
-                ? p.netAmount
-                : p.amount,
-          ),
-        0,
-      );
-
-      // Calculate reserve amount if configured
-      const reservePercent = lockedConfig.reservePercent || 0;
       const reserveDays = lockedConfig.reserveDays || 0;
-      const reservedAmount = reservePercent > 0 ? (totalAmount * reservePercent) / 100 : 0;
-      const netAmount = totalAmount - reservedAmount;
-
       // Calculate release date
       const reservedReleaseAt = reserveDays > 0 
         ? new Date(Date.now() + reserveDays * 24 * 60 * 60 * 1000)
@@ -633,6 +668,7 @@ export class SettlementsService {
         schedule: lockedConfig.schedule,
         totalAmount,
         reservedAmount,
+        reservedReleaseAt,
         netAmount,
         currency: lockedConfig.currency,
         payoutDestinationId: lockedConfig.destinationId,
@@ -683,7 +719,7 @@ export class SettlementsService {
 
       // Mark settlement as completed
       savedSettlement.status = SettlementStatus.COMPLETED;
-      await this.settlementRepo.save(savedSettlement);
+      await queryRunner.manager.save(savedSettlement);
 
       await queryRunner.commitTransaction();
 

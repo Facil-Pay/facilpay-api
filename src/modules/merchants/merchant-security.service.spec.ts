@@ -34,6 +34,14 @@ describe('Merchant security settings', () => {
     db.rows(WebAuthnCredential).push({ userId: 'member' });
     await expect(service.enforce('member', 'GET', '/v1/payments')).resolves.toBeUndefined();
   });
+  it('preserves idle session and muxed-account settings from main', async () => {
+    expect(await service.upsertSettings('owner', { idleSessionTimeoutMinutes: 30, muxedAccountsEnabled: true }))
+      .toMatchObject({ idleSessionTimeoutMinutes: 30, muxedAccountsEnabled: true });
+    expect(await service.upsertSettings('owner', { apiKeyInactivityDays: 60 }))
+      .toMatchObject({ idleSessionTimeoutMinutes: 30, muxedAccountsEnabled: true, apiKeyInactivityDays: 60 });
+    expect(await service.upsertSettings('owner', { idleSessionTimeoutMinutes: null }))
+      .toMatchObject({ idleSessionTimeoutMinutes: null, muxedAccountsEnabled: true });
+  });
   it('validates inactivity settings and supports explicitly disabling', async () => {
     await expect(service.upsertSettings('owner', { apiKeyInactivityDays: 7 })).rejects.toThrow('between 8');
     expect(await service.upsertSettings('owner', { apiKeyInactivityDays: 30 })).toMatchObject({ apiKeyInactivityDays: 30 });

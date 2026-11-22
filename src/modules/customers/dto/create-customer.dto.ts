@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEmail,
   IsNotEmpty,
   IsObject,
@@ -51,4 +53,18 @@ export class CreateCustomerDto {
     additionalProperties: true,
   })
   metadata?: Record<string, unknown> | null;
+
+  @IsArray()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  @IsOptional()
+  @ApiPropertyOptional({
+    description:
+      'Tags used to segment customers. Stored trimmed and lowercased, duplicates removed.',
+    example: ['vip', 'wholesale'],
+    type: [String],
+    maxItems: 20,
+  })
+  tags?: string[];
 }

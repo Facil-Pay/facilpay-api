@@ -33,6 +33,7 @@ import {
 } from './dto/create-payment-link.dto';
 import { UpdatePaymentLinkDto } from './dto/update-payment-link.dto';
 import { RedeemPaymentLinkDto } from './dto/redeem-payment-link.dto';
+import { BulkDeactivatePaymentLinksDto } from './dto/bulk-deactivate-payment-links.dto';
 import { GetAnalyticsDto, AnalyticsResponseDto } from './dto/get-analytics.dto';
 import { PaymentLink } from './payment-link.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -59,6 +60,20 @@ export class PaymentLinksController {
   @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
   create(@Body() dto: CreatePaymentLinkDto, @Request() req: any) {
     return this.service.create(dto, req.user.id);
+  }
+
+  @Post('bulk-deactivate')
+  @ApiBearerAuth('bearer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Deactivate multiple payment links',
+    description: 'Deactivates up to 100 payment links in one call and returns a per-id result. Ids that do not exist or belong to another merchant are skipped.',
+  })
+  @ApiOkResponse({ description: 'Per-id deactivation results.' })
+  @ApiResponse({ status: 400, description: 'ids missing, not UUIDs, or more than 100 supplied.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  bulkDeactivate(@Body() dto: BulkDeactivatePaymentLinksDto, @Request() req: any) {
+    return this.service.bulkDeactivate(dto.ids, req.user.id);
   }
 
   @Post(':id/duplicate')

@@ -14,6 +14,7 @@ jest.mock('bcrypt');
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { LoginHistoryService } from './login-history.service';
 import { AuthService } from './auth.service';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
@@ -34,7 +35,6 @@ import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as otplib from 'otplib';
 import { PasswordStrengthService } from './password-strength.service';
-import { LoginHistoryService } from './login-history.service';
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { WebAuthnService } from './webauthn.service';
 import { GeoLookupService } from '../merchants/geo-lookup.service';
@@ -378,6 +378,8 @@ describe('AuthService', () => {
       expect(jwtService.signAsync).toHaveBeenCalledWith({
         sub: user.id,
         email: user.email,
+        roles: undefined,
+        sid: 'sess-id',
       });
       expect(result).toMatchObject({
         access_token: 'jwt-token-123',
@@ -629,6 +631,14 @@ describe('AuthService', () => {
       });
       mockJwtService.signAsync.mockResolvedValue('new-access-token');
       mockUsersService.findOne.mockResolvedValue(user);
+    });
+
+    it('rejects idle or revoked sessions instead of creating a replacement session', async () => {
+      mockManager.findOne.mockResolvedValue({ ...validTokenRecord, sessionId: 'idle-session' });
+      const sessions = (service as any).sessionsService;
+      sessions.touchSession.mockResolvedValueOnce(null);
+      await expect(service.refresh('raw-token')).rejects.toThrow('Session expired or revoked');
+      expect(sessions.createSession).not.toHaveBeenCalled();
     });
 
     it('should rotate tokens on a valid refresh call', async () => {

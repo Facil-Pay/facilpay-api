@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
@@ -20,9 +21,13 @@ import {
   ApiGoneResponse,
   ApiUnauthorizedResponse,
   ApiBadRequestResponse,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CheckoutSessionsService } from './checkout-sessions.service';
-import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
+import {
+  ApplyCheckoutCouponDto,
+  CreateCheckoutSessionDto,
+} from './dto/create-checkout-session.dto';
 import { CheckoutSession } from './entities/checkout-session.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -142,7 +147,10 @@ export class CheckoutSessionsPublicController {
         merchantLogo: 'https://storage.example.com/logo.png',
         primaryColor: '#1a1a2e',
         lineItems: [{ name: 'Product 1', quantity: 2, unitAmount: 1000 }],
-        totalFormatted: '$20.00',
+        subtotalFormatted: 'USD 20.00',
+        discountFormatted: 'USD 2.00',
+        couponCode: 'SPRING10',
+        totalFormatted: 'USD 18.00',
         status: 'OPEN',
         isExpired: false,
         successUrl: 'https://example.com/success',
@@ -165,11 +173,56 @@ export class CheckoutSessionsPublicController {
       merchantLogo: branding.logo,
       primaryColor: branding.primaryColor,
       lineItems: session.lineItems,
-      totalFormatted: `${session.currency} ${(Number(session.total) / 100).toFixed(2)}`,
+      ...this.formatAmounts(session),
       status: session.status,
       isExpired,
       successUrl: session.successUrl,
       cancelUrl: session.cancelUrl,
+    };
+  }
+
+  @Post(':publicId/coupon')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Apply a coupon to a checkout session',
+    description:
+      'Validates the coupon against the session currency and amount and recomputes the total. The redemption is only counted when the session completes. No authentication required.',
+  })
+  @ApiOkResponse({ description: 'Coupon applied; returns recomputed amounts.' })
+  @ApiBadRequestResponse({ description: 'Session is not open' })
+  @ApiNotFoundResponse({ description: 'Session not found' })
+  @ApiGoneResponse({ description: 'Session has expired' })
+  @ApiUnprocessableEntityResponse({ description: 'Coupon is invalid, expired, exhausted or does not apply' })
+  async applyCoupon(
+    @Param('publicId') publicId: string,
+    @Body() dto: ApplyCheckoutCouponDto,
+  ): Promise<object> {
+    const session = await this.service.applyCoupon(publicId, dto.couponCode);
+    return this.formatAmounts(session);
+  }
+
+  @Delete(':publicId/coupon')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Remove the coupon from a checkout session',
+    description: 'Restores the undiscounted total. No authentication required.',
+  })
+  @ApiOkResponse({ description: 'Coupon removed; returns recomputed amounts.' })
+  @ApiBadRequestResponse({ description: 'Session is not open' })
+  @ApiNotFoundResponse({ description: 'Session not found' })
+  @ApiGoneResponse({ description: 'Session has expired' })
+  async removeCoupon(@Param('publicId') publicId: string): Promise<object> {
+    const session = await this.service.removeCoupon(publicId);
+    return this.formatAmounts(session);
+  }
+
+  private formatAmounts(session: CheckoutSession) {
+    const format = (minor: number) => `${session.currency} ${(Number(minor) / 100).toFixed(2)}`;
+    return {
+      subtotalFormatted: format(session.subtotal ?? session.total),
+      discountFormatted: format(session.discountAmount ?? 0),
+      couponCode: session.couponCode ?? null,
+      totalFormatted: format(session.total),
     };
   }
 }

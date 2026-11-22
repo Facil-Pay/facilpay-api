@@ -4,6 +4,7 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
@@ -12,8 +13,15 @@ import {
   RecurringPaymentInterval,
   RecurringPaymentStatus,
 } from './recurring-payment.entity';
+import {
+  calculateRecurringPaymentProration,
+  RecurringPaymentProrationPreview,
+} from './recurring-payment-proration';
 import { CreateRecurringPaymentDto } from './dto/create-recurring-payment.dto';
-import { UpdateRecurringPaymentDto } from './dto/update-recurring-payment.dto';
+import {
+  RecurringPaymentProrationBehavior,
+  UpdateRecurringPaymentDto,
+} from './dto/update-recurring-payment.dto';
 import { PaymentsService } from './payments.service';
 import { IdempotencyService } from './idempotency.service';
 import { AppLogger } from '../logger/logger.service';
@@ -27,6 +35,13 @@ import {
   RecurringPaymentCharge,
   RecurringPaymentChargeStatus,
 } from './recurring-payment-charge.entity';
+import { Customer } from '../customers/customer.entity';
+
+interface PayerCancellationTokenPayload {
+  planId: string;
+  expiresAt: number;
+  nonce: string;
+}
 
 @Injectable()
 export class RecurringPaymentsService {
@@ -58,6 +73,18 @@ export class RecurringPaymentsService {
     if (dto.endAt && new Date(dto.endAt).getTime() <= Date.now()) {
       throw new BadRequestException('endAt must be in the future');
     }
+    const merchantId = dto.merchantId ?? createdBy;
+    const customerId = dto.customerId ?? null;
+    if (customerId) {
+      const customer = await this.recurringPaymentRepository.manager
+        .getRepository(Customer)
+        .findOneBy({ id: customerId });
+      if (!customer || customer.merchantId !== merchantId) {
+        throw new BadRequestException(
+          'Customer must belong to the requesting merchant',
+        );
+      }
+    }
 
     const trialDays = dto.trialDays ?? 0;
     const trialStartAt = dto.startAt ? new Date(dto.startAt) : new Date();
@@ -87,6 +114,10 @@ export class RecurringPaymentsService {
       consecutiveFailures: 0,
       occurrences: 0,
       lastNotifiedCycle: null,
+      payerCancellationEnabled: dto.payerCancellationEnabled ?? true,
+      cancelTokenHash: null,
+      cancelTokenExpiresAt: null,
+      cancelTokenUsedAt: null,
       trialDays,
       trialEndsAt,
       trialEndingNotifiedAt: null,
@@ -143,11 +174,54 @@ export class RecurringPaymentsService {
   ): Promise<RecurringPayment> {
     const plan = await this.findOne(id, createdBy);
 
-    if (dto.amount !== undefined) plan.amount = dto.amount;
+    if (dto.amount !== undefined) {
+      const currentAmount = Number(plan.prorationBaseAmount ?? plan.amount);
+      const newAmount = Number(dto.amount);
+      if (
+        dto.prorationBehavior ===
+          RecurringPaymentProrationBehavior.CREATE_ADJUSTMENT &&
+        plan.lastRunAt &&
+        plan.nextRunAt
+      ) {
+        plan.pendingProrationAmount = calculateRecurringPaymentProration(
+          currentAmount,
+          newAmount,
+          plan.lastRunAt,
+          plan.nextRunAt,
+        ).adjustmentAmount;
+        plan.prorationBaseAmount = currentAmount;
+      } else {
+        plan.pendingProrationAmount = null;
+        plan.prorationBaseAmount = null;
+      }
+      plan.amount = dto.amount;
+    }
     if (dto.interval !== undefined) plan.interval = dto.interval;
     if (dto.description !== undefined) plan.description = dto.description;
+    if (dto.payerCancellationEnabled !== undefined) {
+      plan.payerCancellationEnabled = dto.payerCancellationEnabled;
+      if (!dto.payerCancellationEnabled) {
+        plan.cancelTokenHash = null;
+        plan.cancelTokenExpiresAt = null;
+        plan.cancelTokenUsedAt = null;
+      }
+    }
 
     return this.recurringPaymentRepository.save(plan);
+  }
+
+  async previewProration(
+    id: string,
+    createdBy: string,
+    newAmount: number,
+  ): Promise<RecurringPaymentProrationPreview> {
+    const plan = await this.findOne(id, createdBy);
+    return calculateRecurringPaymentProration(
+      Number(plan.prorationBaseAmount ?? plan.amount),
+      Number(newAmount),
+      plan.lastRunAt ?? null,
+      plan.nextRunAt ?? null,
+    );
   }
 
   async pause(id: string, createdBy: string): Promise<RecurringPayment> {
@@ -158,7 +232,18 @@ export class RecurringPaymentsService {
       );
     }
     plan.status = RecurringPaymentStatus.PAUSED;
-    return this.recurringPaymentRepository.save(plan);
+    const saved = await this.recurringPaymentRepository.save(plan);
+    if (plan.merchantId) {
+      await this.webhooksService.dispatchEventToMerchant(
+        plan.merchantId,
+        'recurring.paused',
+        {
+          planId: plan.id,
+          reason: 'manual_pause',
+        },
+      );
+    }
+    return saved;
   }
 
   async resume(id: string, createdBy: string): Promise<RecurringPayment> {
@@ -182,7 +267,159 @@ export class RecurringPaymentsService {
     }
     plan.status = RecurringPaymentStatus.CANCELLED;
     plan.cancelledAt = new Date();
-    return this.recurringPaymentRepository.save(plan);
+    const saved = await this.recurringPaymentRepository.save(plan);
+    if (plan.merchantId) {
+      await this.webhooksService.dispatchEventToMerchant(
+        plan.merchantId,
+        'recurring.cancelled',
+        {
+          planId: plan.id,
+        },
+      );
+    }
+    return saved;
+  }
+
+  async getPayerCancellation(token: string) {
+    const { payload, plan } = await this.validatePayerCancellationToken(token);
+    return {
+      planId: payload.planId,
+      amount: plan.amount,
+      currency: plan.currency,
+      description: plan.description,
+      nextRunAt: plan.nextRunAt,
+    };
+  }
+
+  async cancelWithToken(token: string): Promise<{
+    planId: string;
+    status: RecurringPaymentStatus;
+    cancelledAt: Date;
+  }> {
+    const { payload } = await this.validatePayerCancellationToken(token);
+    const now = new Date();
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const result = await this.recurringPaymentRepository
+      .createQueryBuilder()
+      .update(RecurringPayment)
+      .set({
+        status: RecurringPaymentStatus.CANCELLED,
+        cancelledAt: now,
+        cancelTokenUsedAt: now,
+      })
+      .where('"id" = :id', { id: payload.planId })
+      .andWhere('"cancelTokenHash" = :tokenHash', { tokenHash })
+      .andWhere('"cancelTokenExpiresAt" > :now', { now })
+      .andWhere('"cancelTokenUsedAt" IS NULL')
+      .andWhere('"payerCancellationEnabled" = true')
+      .andWhere('"status" IN (:...statuses)', {
+        statuses: [
+          RecurringPaymentStatus.ACTIVE,
+          RecurringPaymentStatus.TRIALING,
+          RecurringPaymentStatus.PAUSED,
+        ],
+      })
+      .execute();
+
+    if (!result.affected) {
+      throw new BadRequestException('Invalid or expired cancellation link');
+    }
+
+    const plan = await this.recurringPaymentRepository.findOneBy({
+      id: payload.planId,
+    });
+    if (!plan) {
+      throw new BadRequestException('Invalid or expired cancellation link');
+    }
+    if (plan.merchantId) {
+      await this.webhooksService.dispatchEventToMerchant(
+        plan.merchantId,
+        'recurring.cancelled',
+        { planId: plan.id },
+      );
+    }
+    return {
+      planId: plan.id,
+      status: plan.status,
+      cancelledAt: plan.cancelledAt,
+    };
+  }
+
+  private createPayerCancellationToken(planId: string): {
+    token: string;
+    expiresAt: Date;
+  } {
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const payload: PayerCancellationTokenPayload = {
+      planId,
+      expiresAt: expiresAt.getTime(),
+      nonce: randomBytes(16).toString('hex'),
+    };
+    const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
+      'base64url',
+    );
+    const signature = this.signPayerCancellationPayload(encodedPayload);
+    return { token: `${encodedPayload}.${signature}`, expiresAt };
+  }
+
+  private async validatePayerCancellationToken(token: string) {
+    try {
+      const [encodedPayload, signature, extra] = token.split('.');
+      if (!encodedPayload || !signature || extra || !/^[a-f0-9]{64}$/.test(signature)) {
+        throw new Error('Malformed token');
+      }
+
+      const expectedSignature = this.signPayerCancellationPayload(encodedPayload);
+      if (
+        !timingSafeEqual(
+          Buffer.from(signature, 'hex'),
+          Buffer.from(expectedSignature, 'hex'),
+        )
+      ) {
+        throw new Error('Invalid signature');
+      }
+
+      const payload = JSON.parse(
+        Buffer.from(encodedPayload, 'base64url').toString('utf8'),
+      ) as PayerCancellationTokenPayload;
+      if (
+        typeof payload.planId !== 'string' ||
+        typeof payload.expiresAt !== 'number' ||
+        typeof payload.nonce !== 'string' ||
+        payload.expiresAt <= Date.now()
+      ) {
+        throw new Error('Expired token');
+      }
+
+      const plan = await this.recurringPaymentRepository.findOneBy({
+        id: payload.planId,
+      });
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      if (
+        !plan ||
+        !plan.payerCancellationEnabled ||
+        plan.status === RecurringPaymentStatus.CANCELLED ||
+        plan.cancelTokenUsedAt ||
+        !plan.cancelTokenExpiresAt ||
+        plan.cancelTokenExpiresAt.getTime() <= Date.now() ||
+        !plan.cancelTokenHash ||
+        !timingSafeEqual(
+          Buffer.from(plan.cancelTokenHash, 'hex'),
+          Buffer.from(tokenHash, 'hex'),
+        )
+      ) {
+        throw new Error('Invalid or expired token');
+      }
+
+      return { payload, plan };
+    } catch {
+      throw new BadRequestException('Invalid or expired cancellation link');
+    }
+  }
+
+  private signPayerCancellationPayload(encodedPayload: string): string {
+    const secret = this.configService.get<string>('JWT_SECRET') || 'your-secret-key';
+    return createHmac('sha256', secret).update(encodedPayload).digest('hex');
   }
 
   private computeNextRunAt(
@@ -233,6 +470,8 @@ export class RecurringPaymentsService {
   private async executePlan(plan: RecurringPayment): Promise<void> {
     const scheduledFor = plan.nextRunAt;
     const idempotencyKey = `recurring-payment:${plan.id}:${scheduledFor.toISOString()}`;
+    const prorationAmount = Number(plan.pendingProrationAmount ?? 0);
+    const chargeAmount = Number((Number(plan.amount) + prorationAmount).toFixed(2));
     let chargeAttempt: RecurringPaymentCharge | null = null;
 
     try {
@@ -245,7 +484,8 @@ export class RecurringPaymentsService {
           recurringPaymentId: plan.id,
           cycleNumber: (plan.occurrences ?? 0) + 1,
           paymentId: null,
-          amount: plan.amount,
+          amount: chargeAmount,
+          prorationAmount,
           status: RecurringPaymentChargeStatus.PENDING,
           failureReason: null,
         }),
@@ -254,6 +494,8 @@ export class RecurringPaymentsService {
       const requestBody = {
         planId: plan.id,
         scheduledFor: scheduledFor.toISOString(),
+        amount: chargeAmount,
+        prorationAmount,
       };
       const existing = await this.idempotencyService.checkKey(
         idempotencyKey,
@@ -264,7 +506,7 @@ export class RecurringPaymentsService {
       if (!existing) {
         const payment = await this.paymentsService.create(
           {
-            amount: plan.amount,
+            amount: chargeAmount,
             currency: plan.currency,
             description: plan.description ?? undefined,
             merchantId: plan.merchantId ?? undefined,
@@ -295,8 +537,24 @@ export class RecurringPaymentsService {
         );
       }
 
+      if (plan.merchantId) {
+        await this.webhooksService.dispatchEventToMerchant(
+          plan.merchantId,
+          'recurring.charge_succeeded',
+          {
+            planId: plan.id,
+            cycleNumber: chargeAttempt.cycleNumber,
+            paymentId,
+            amount: plan.amount,
+            currency: plan.currency,
+          },
+        );
+      }
+
       plan.lastRunAt = scheduledFor;
       plan.occurrences = (plan.occurrences ?? 0) + 1;
+      plan.pendingProrationAmount = null;
+      plan.prorationBaseAmount = null;
       const nextRunAt = this.computeNextRunAt(plan.interval, scheduledFor);
 
       if (plan.maxOccurrences !== null && plan.occurrences >= plan.maxOccurrences) {
@@ -356,7 +614,36 @@ export class RecurringPaymentsService {
       }
 
       await this.recurringPaymentRepository.save(plan);
+
+      if (plan.merchantId) {
+        await this.webhooksService.dispatchEventToMerchant(
+          plan.merchantId,
+          'recurring.charge_failed',
+          {
+            planId: plan.id,
+            cycleNumber:
+              chargeAttempt?.cycleNumber ?? (plan.occurrences ?? 0) + 1,
+            attemptNumber: consecutiveFailures,
+            amount: plan.amount,
+            currency: plan.currency,
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        );
+      }
     }
+  }
+
+  private async notifyPlanPaused(plan: RecurringPayment): Promise<void> {
+    if (!plan.merchantId) return;
+    await this.webhooksService.dispatchEventToMerchant(
+      plan.merchantId,
+      'recurring.paused',
+      {
+        planId: plan.id,
+        reason: 'auto_pause_after_failures',
+        consecutiveFailures: plan.consecutiveFailures,
+      },
+    );
   }
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -398,7 +685,15 @@ export class RecurringPaymentsService {
 
     const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
     const manageUrl = `${appUrl}/recurring/${plan.id}`;
-    const cancelUrl = `${appUrl}/recurring/${plan.id}/cancel`;
+    let cancelUrl = '';
+    if (plan.payerCancellationEnabled !== false) {
+      const { token, expiresAt } = this.createPayerCancellationToken(plan.id);
+      plan.cancelTokenHash = createHash('sha256').update(token).digest('hex');
+      plan.cancelTokenExpiresAt = expiresAt;
+      plan.cancelTokenUsedAt = null;
+      await this.recurringPaymentRepository.save(plan);
+      cancelUrl = `${appUrl}/v1/recurring-payments/public/cancel?token=${encodeURIComponent(token)}`;
+    }
 
     await this.emailNotificationService.sendPayerRecurringPaymentReminder(
       plan.payerEmail,

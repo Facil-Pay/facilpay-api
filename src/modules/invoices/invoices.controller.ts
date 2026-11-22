@@ -62,4 +62,9 @@ export class InvoicesController {
   void(@Param('id') id: string, @Req() req: any) {
     return this.invoicesService.void(req.user.id, id);
   }
+
+  @Post(':id/duplicate')
+  duplicate(@Param('id') id: string, @Req() req: any) {
+    return this.invoicesService.duplicate(req.user.id, id);
+  }
 }

@@ -5,6 +5,7 @@ import { Event } from './entities/event.entity';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
 import { ConfigService } from '@nestjs/config';
+import { sanitizeBody } from '../logger/logging.utils';
 
 @Injectable()
 export class EventsService {
@@ -25,7 +26,7 @@ export class EventsService {
     const event = this.eventRepo.create({
       merchantId,
       type,
-      payload,
+      payload: sanitizeBody(payload, 0) as Record<string, any>,
     });
     return this.eventRepo.save(event);
   }

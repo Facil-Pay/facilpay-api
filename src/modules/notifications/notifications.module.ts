@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
 import { MailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/adapters/handlebars.adapter';
+import { HttpModule } from '@nestjs/axios';
 import { join } from 'path';
 import { EmailLog } from './email-log.entity';
 import { EmailService } from './email.service';
@@ -19,6 +20,7 @@ import { InAppNotificationsController } from './in-app-notifications.controller'
 import { NotificationPreference } from './notification-preference.entity';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationPreferencesController } from './notification-preferences.controller';
+import { SlackNotificationService } from './slack-notification.service';
 
 @Module({
   imports: [
@@ -31,6 +33,7 @@ import { NotificationPreferencesController } from './notification-preferences.co
     BullModule.registerQueue({
       name: 'emails',
     }),
+    HttpModule,
     MailerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -72,6 +75,7 @@ import { NotificationPreferencesController } from './notification-preferences.co
     EmailEventsService,
     InAppNotificationsService,
     NotificationPreferencesService,
+    SlackNotificationService,
   ],
   exports: [
     EmailService,
@@ -79,6 +83,7 @@ import { NotificationPreferencesController } from './notification-preferences.co
     EmailEventsService,
     InAppNotificationsService,
     NotificationPreferencesService,
+    SlackNotificationService,
   ],
 })
 export class NotificationsModule {}

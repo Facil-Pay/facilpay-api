@@ -14,6 +14,7 @@ import {
   MaxLength,
   IsPositive,
   IsInt,
+  IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsISO4217CurrencyCode } from '../../../common/validators/is-iso4217-currency-code.validator';
@@ -168,4 +169,12 @@ export class CreateRecurringPaymentDto {
     maximum: 14,
   })
   notifyDaysBefore?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  @ApiPropertyOptional({
+    description: 'Whether the payer can cancel the plan from reminder emails',
+    default: true,
+  })
+  payerCancellationEnabled?: boolean;
 }

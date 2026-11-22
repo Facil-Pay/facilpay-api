@@ -31,6 +31,7 @@ describe('SAML service configuration', () => {
     Object.assign(auth, { dataSource: db, usersService: { findByEmail: async () => user, findByIdWithSecrets: async () => user, isAccountLocked: () => false } });
     await expect(auth.login({ email: 'member@example.com', password: 'password' })).rejects.toThrow('requires SAML SSO');
     await expect(auth.completePasskeyLogin('member')).rejects.toThrow('requires SAML SSO');
+    await expect(auth.completeOAuthLogin('member')).rejects.toThrow('requires SAML SSO');
   });
 
   it('requires a secure, operator-configured public origin', async () => {

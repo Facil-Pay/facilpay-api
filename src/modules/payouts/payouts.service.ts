@@ -9,6 +9,8 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
+import { parsePayoutCsv } from './payout-csv.util';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import {
   ACTIVE_PAYOUT_STATUSES,
@@ -174,6 +176,74 @@ export class PayoutsService {
 
     await this.dispatchEvent(payout, 'payout.created');
     return payout;
+  }
+
+  async cancel(merchantId: string, id: string): Promise<Payout> {
+    const payout = await this.dataSource.transaction(async manager => {
+      const row = await manager.findOne(Payout, {
+        where: { id, merchantId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!row) throw new NotFoundException('Payout not found');
+      if (row.status === PayoutStatus.CANCELLED) return row;
+      if (row.status !== PayoutStatus.PENDING) {
+        throw new ConflictException('Only pending payouts can be cancelled');
+      }
+      row.status = PayoutStatus.CANCELLED;
+      return manager.save(row);
+    });
+    // An already active job cannot be removed. Its conditional claim below
+    // observes CANCELLED and skips submission, even if queue cleanup fails.
+    try {
+      const job = await this.payoutsQueue.getJob(id);
+      if (job) await job.remove();
+    } catch (error) {
+      this.logger.warn(`Could not remove cancelled payout job ${id}: ${String(error)}`);
+    }
+    await this.dispatchEvent(payout, 'payout.cancelled');
+    return payout;
+  }
+
+  async createBulk(merchantId: string, csv: string, stepUpToken: string) {
+    this.authService.validateStepUpToken(stepUpToken, merchantId);
+    await this.usersService.assertMerchantActive(merchantId);
+    const rows = parsePayoutCsv(csv);
+    if (new Set(rows.map(row => row.reference)).size !== rows.length) {
+      throw new BadRequestException('Duplicate references in CSV');
+    }
+    for (const row of rows) {
+      await this.stellarService.validatePayoutRecipient(row.destination, row.currency, row.memo?.trim() || null);
+    }
+    const batchId = randomUUID();
+    const payouts = await this.dataSource.transaction(async manager => {
+      const totals = new Map<string, bigint>();
+      for (const row of rows) totals.set(row.currency, (totals.get(row.currency) ?? 0n) + toUnits(row.amount));
+      // Stable lock order prevents deadlocks between multi-currency batches.
+      for (const currency of [...totals.keys()].sort()) {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`payout:${merchantId}:${currency}`]);
+        const balance = await this.computeBalance(manager, merchantId, currency);
+        const limit = await this.getDailyLimit(manager, merchantId, currency);
+        const used = await this.sumPayoutsSince(manager, merchantId, currency, startOfUtcDay(new Date()));
+        const amount = totals.get(currency)!;
+        if (amount > toUnits(balance.available) || used + amount > toUnits(limit)) {
+          throw new BadRequestException(`Batch exceeds available balance or daily limit for ${currency}`);
+        }
+      }
+      for (const row of rows) {
+        if (await manager.findOne(Payout, { where: { merchantId, reference: row.reference } })) {
+          throw new ConflictException(`Reference ${row.reference} already exists`);
+        }
+      }
+      return manager.save(rows.map(row => manager.create(Payout, {
+        ...row, merchantId, batchId, amount: fromUnits(toUnits(row.amount)),
+        memo: row.memo?.trim() || null, status: PayoutStatus.PENDING,
+      })));
+    });
+    await this.payoutsQueue.addBulk(payouts.map(payout => ({
+      name: 'process', data: { payoutId: payout.id },
+      opts: { jobId: payout.id, attempts: 1, removeOnComplete: true, removeOnFail: false },
+    })));
+    for (const payout of payouts) await this.dispatchEvent(payout, 'payout.created');
+    return { batchId, rows: payouts.map((payout, i) => ({ row: i + 2, payoutId: payout.id, reference: payout.reference, status: payout.status })) };
   }
 
   async findAll(

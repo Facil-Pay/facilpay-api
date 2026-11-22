@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   GoneException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -16,6 +17,7 @@ import { WebhooksService } from '../webhooks/webhooks.service';
 import { PaymentsService } from '../payments/payments.service';
 import { ProductsService } from '../products/products.service';
 import { Payment, PaymentStatus } from '../payments/payment.entity';
+import { CouponsService, calculateCouponDiscount } from '../coupons/coupons.service';
 import { AppLogger } from '../logger/logger.service';
 import type { Logger } from 'pino';
 
@@ -33,6 +35,7 @@ export class CheckoutSessionsService {
     private readonly productsService: ProductsService,
     private readonly configService: ConfigService,
     appLogger: AppLogger,
+    private readonly couponsService: CouponsService,
   ) {
     this.logger = appLogger.child({ module: CheckoutSessionsService.name });
     this.baseUrl = this.configService.get('CHECKOUT_BASE_URL', 'https://checkout.facilpay.com');
@@ -80,7 +83,8 @@ export class CheckoutSessionsService {
     );
 
     // Calculate total from line items (server-side)
-    const total = this.calculateTotal(resolvedLineItems);
+    const subtotal = this.calculateTotal(resolvedLineItems);
+    const currency = dto.currency.toUpperCase();
 
     // Generate public ID (URL-safe, 24 chars)
     const publicId = this.generatePublicId();
@@ -94,8 +98,12 @@ export class CheckoutSessionsService {
       publicId,
       merchantId,
       lineItems: resolvedLineItems as LineItem[],
-      currency: dto.currency.toUpperCase(),
-      total,
+      currency,
+      subtotal,
+      total: subtotal,
+      discountAmount: 0,
+      couponId: null,
+      couponCode: null,
       customerId: dto.customerId || null,
       customerEmail: dto.customerEmail || null,
       successUrl: dto.successUrl,
@@ -104,10 +112,14 @@ export class CheckoutSessionsService {
       status: CheckoutSessionStatus.OPEN,
     });
 
+    if (dto.couponCode) {
+      await this.applyCouponToSession(session, dto.couponCode);
+    }
+
     const saved = await this.sessionRepo.save(session);
 
     this.logger.info(
-      { sessionId: saved.id, publicId, merchantId, total },
+      { sessionId: saved.id, publicId, merchantId, total: saved.total, couponId: saved.couponId },
       'Checkout session created',
     );
 
@@ -167,6 +179,28 @@ export class CheckoutSessionsService {
   }
 
   /**
+   * Apply a coupon to an open session from the payer-facing page.
+   * Redemption is only counted when the session completes.
+   */
+  async applyCoupon(publicId: string, couponCode: string): Promise<CheckoutSession> {
+    const session = await this.getOpenPublicSession(publicId);
+    await this.applyCouponToSession(session, couponCode);
+    return this.sessionRepo.save(session);
+  }
+
+  /**
+   * Remove a previously applied coupon and restore the undiscounted total.
+   */
+  async removeCoupon(publicId: string): Promise<CheckoutSession> {
+    const session = await this.getOpenPublicSession(publicId);
+    session.total = this.getSubtotal(session);
+    session.discountAmount = 0;
+    session.couponId = null;
+    session.couponCode = null;
+    return this.sessionRepo.save(session);
+  }
+
+  /**
    * Expire a checkout session manually
    */
   async expire(id: string, merchantId: string): Promise<CheckoutSession> {
@@ -209,22 +243,43 @@ export class CheckoutSessionsService {
       throw new BadRequestException(`Session is not open (status: ${session.status})`);
     }
 
+    // Count the coupon redemption first: it re-checks validity atomically, so
+    // a coupon that expired or ran out since it was applied is rejected here.
+    if (session.couponId) {
+      await this.couponsService.redeem(session.couponId);
+    }
+
     // Create payment using PaymentsService
-    const payment = await this.paymentsService.create(
-      {
-        amount: Number(session.total) / 100, // Convert from cents
-        currency: session.currency,
-        merchantId: session.merchantId,
-        description: session.lineItems.map(item => `${item.quantity}x ${item.name}`).join(', '),
-        payerEmail,
-        customerId: session.customerId ?? undefined,
-        metadata: {
-          ...metadata,
-          checkoutSessionId: session.id,
-          checkoutPublicId: session.publicId,
+    let payment: Payment;
+    try {
+      payment = await this.paymentsService.create(
+        {
+          amount: Number(session.total) / 100, // Convert from cents
+          currency: session.currency,
+          merchantId: session.merchantId,
+          description: session.lineItems.map(item => `${item.quantity}x ${item.name}`).join(', '),
+          payerEmail,
+          customerId: session.customerId ?? undefined,
+          metadata: {
+            ...metadata,
+            checkoutSessionId: session.id,
+            checkoutPublicId: session.publicId,
+            ...(session.couponId
+              ? {
+                  couponId: session.couponId,
+                  couponCode: session.couponCode ?? '',
+                  discountAmount: String(session.discountAmount),
+                }
+              : {}),
+          },
         },
-      },
-    );
+      );
+    } catch (error) {
+      if (session.couponId) {
+        await this.couponsService.releaseRedemption(session.couponId);
+      }
+      throw error;
+    }
 
     // Update session with payment ID and mark as complete
     session.paymentId = payment.id;
@@ -269,6 +324,43 @@ export class CheckoutSessionsService {
     });
 
     return { sessions, total };
+  }
+
+  /**
+   * Validate a coupon against the session's currency and amount, then
+   * recompute subtotal, discount and total on the session (not saved).
+   */
+  private async applyCouponToSession(session: CheckoutSession, couponCode: string): Promise<void> {
+    const coupon = await this.couponsService.validateForCheckoutSession(
+      session.merchantId,
+      couponCode,
+      session.currency,
+    );
+
+    const subtotal = this.getSubtotal(session);
+    // Coupon values are in major units; session amounts are in minor units.
+    const discountAmount = Math.round(calculateCouponDiscount(subtotal / 100, coupon) * 100);
+    if (discountAmount >= subtotal) {
+      throw new UnprocessableEntityException('Coupon discount cannot cover the full session amount');
+    }
+
+    session.subtotal = subtotal;
+    session.discountAmount = discountAmount;
+    session.total = subtotal - discountAmount;
+    session.couponId = coupon.id;
+    session.couponCode = coupon.code;
+  }
+
+  private getSubtotal(session: CheckoutSession): number {
+    return Number(session.subtotal ?? this.calculateTotal(session.lineItems));
+  }
+
+  private async getOpenPublicSession(publicId: string): Promise<CheckoutSession> {
+    const { session } = await this.getPublicSession(publicId);
+    if (session.status !== CheckoutSessionStatus.OPEN) {
+      throw new BadRequestException(`Session is not open (status: ${session.status})`);
+    }
+    return session;
   }
 
   /**

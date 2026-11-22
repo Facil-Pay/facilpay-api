@@ -9,8 +9,10 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -30,17 +32,25 @@ import { Customer } from './customer.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { GetCustomersDto } from './dto/get-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import {
+  MergeCustomerDto,
+  MergeCustomerResult,
+} from './dto/merge-customer.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
+import { CustomerPortalService } from './customer-portal.service';
 
 @ApiTags('customers')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
 @Controller('v1/customers')
 export class CustomersController {
-  constructor(private readonly customersService: CustomersService) {}
+  constructor(
+    private readonly customersService: CustomersService,
+    private readonly customerPortalService: CustomerPortalService,
+  ) {}
 
   @Post()
   @ApiOperation({
@@ -66,7 +76,7 @@ export class CustomersController {
   @ApiOperation({
     summary: 'List customers',
     description:
-      'Returns a paginated list of active customers owned by the authenticated merchant. Search is a case-insensitive partial match against email or name.',
+      'Returns a paginated list of active customers owned by the authenticated merchant. Search is a case-insensitive partial match against email or name. Use `tag` to return only customers carrying that tag.',
   })
   @ApiOkResponse({
     description: 'Paginated customer list.',
@@ -80,6 +90,7 @@ export class CustomersController {
             name: 'Jane Doe',
             phone: '+1-555-0100',
             metadata: { tier: 'gold' },
+            tags: ['vip', 'wholesale'],
             createdAt: '2026-09-25T10:00:00.000Z',
             updatedAt: '2026-09-25T10:00:00.000Z',
             deletedAt: null,
@@ -115,6 +126,34 @@ export class CustomersController {
     return this.customersService.findOne(id, user.id);
   }
 
+  @Post(':id/portal-sessions')
+  @ApiOperation({
+    summary: 'Create a customer portal session',
+    description:
+      'Creates a signed, customer-scoped portal URL that expires after one hour by default.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer UUID' })
+  @ApiCreatedResponse({
+    description: 'Short-lived portal URL created.',
+    schema: {
+      example: {
+        url: 'https://api.example.com/v1/public/customer-portal?token=<signed-token>',
+        expiresAt: '2026-10-21T13:00:00.000Z',
+      },
+    },
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Customer not found or not owned by the authenticated merchant.',
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  createPortalSession(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<{ url: string; expiresAt: string }> {
+    return this.customerPortalService.createSession(id, user.id);
+  }
+
   @Patch(':id')
   @ApiOperation({
     summary: 'Update a customer',
@@ -138,6 +177,37 @@ export class CustomersController {
     @CurrentUser() user: User,
   ): Promise<Customer> {
     return this.customersService.update(id, user.id, dto);
+  }
+
+  @Post(':id/merge')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Merge a duplicate customer into this customer',
+    description:
+      'Reassigns payments, invoices, recurring plans and checkout sessions from the duplicate to the customer in the path, then soft-deletes the duplicate and records mergedIntoId on it. Runs in a single transaction and is audit logged. Both customers must belong to the authenticated merchant.',
+  })
+  @ApiParam({ name: 'id', description: 'UUID of the surviving customer' })
+  @ApiBody({ type: MergeCustomerDto })
+  @ApiOkResponse({ description: 'Customers merged.' })
+  @ApiBadRequestResponse({
+    description: 'Invalid body, or a customer was merged into itself.',
+  })
+  @ApiNotFoundResponse({
+    description:
+      'Either customer not found or not owned by the authenticated merchant.',
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  merge(
+    @Param('id') id: string,
+    @Body() dto: MergeCustomerDto,
+    @CurrentUser() user: User,
+    @Req() req: Request,
+  ): Promise<MergeCustomerResult> {
+    return this.customersService.merge(id, dto.duplicateCustomerId, user.id, {
+      id: user.id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
   }
 
   @Delete(':id')

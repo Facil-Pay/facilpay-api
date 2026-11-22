@@ -26,6 +26,9 @@ whether it is required in production.
 | `TWO_FACTOR_ENCRYPTION_KEY` | Key used to encrypt 2FA secrets | *(placeholder)* | **Yes** | a long random string |
 | `LOGIN_MAX_ATTEMPTS` | Failed login attempts before lockout | `5` | No | `5` |
 | `LOGIN_LOCK_DURATION_MINUTES` | Minutes an account stays locked | `15` | No | `15` |
+| `WEBAUTHN_RP_ID` | WebAuthn Relying Party ID (domain) | Hostname from `APP_URL` | No | `facilpay.com` |
+| `WEBAUTHN_ORIGIN` | WebAuthn expected origin | `APP_URL` | No | `https://app.facilpay.com` |
+| `WEBAUTHN_RP_NAME` | WebAuthn Relying Party display name | `FacilPay` | No | `FacilPay` |
 
 ## Database
 
@@ -55,6 +58,12 @@ whether it is required in production.
 | `LOG_BODY` | Log request bodies | `false` | No | `false` |
 | `LOG_BODY_MAX_LENGTH` | Max request body length logged | `2048` | No | `2048` |
 | `LOG_RESPONSE_BODY` | Log response bodies | `false` | No | `false` |
+
+## Tracing
+
+| Variable | Description | Default | Required | Example |
+| --- | --- | --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry OTLP HTTP exporter endpoint (required to enable tracing; if not set, tracing is disabled) | *(empty — tracing disabled)* | No | `http://otel-collector:4318/v1/traces` |
 
 ## Stellar
 
@@ -133,6 +142,7 @@ used for IP allowlist / geo-restriction checks.
 | Variable | Description | Default | Required | Example |
 | --- | --- | --- | --- | --- |
 | `WEBHOOK_SECRET` | Secret used for HMAC webhook signature verification | *(placeholder)* | **Yes** | a long random string |
+| `WEBHOOK_SECRET_GRACE_PERIOD_HOURS` | Hours the previous endpoint signing secret keeps signing deliveries after `POST /v1/webhooks/:id/rotate-secret` (a request can override it with `gracePeriodHours`) | `24` | No | `48` |
 
 > The `SUPPORTED_CURRENCIES` variable is read by
 > `src/modules/payments/currency-config.service.ts`; currencies not in
