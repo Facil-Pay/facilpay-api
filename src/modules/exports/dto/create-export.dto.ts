@@ -11,15 +11,43 @@ import { ExportFilters, ExportFormat, ExportType } from '../exports.service';
 
 export class CreateExportDto {
   @ApiProperty({
-    enum: ['payments', 'customers', 'invoices', 'refunds', 'ledger'],
+    enum: [
+      'payments',
+      'customers',
+      'invoices',
+      'refunds',
+      'ledger',
+      'quickbooks_iif',
+      'quickbooks_csv',
+      'xero_csv',
+    ],
+    description: 'Export type. Use resource as a backwards-compatible alias.',
   })
-  @IsIn(['payments', 'customers', 'invoices', 'refunds', 'ledger'])
-  resource: ExportType;
-
-  @ApiPropertyOptional({ enum: ['csv', 'pdf'], default: 'csv' })
   @IsOptional()
-  @IsIn(['csv', 'pdf'])
-  format: ExportFormat = 'csv';
+  @IsIn([
+    'payments',
+    'customers',
+    'invoices',
+    'refunds',
+    'ledger',
+    'quickbooks_iif',
+    'quickbooks_csv',
+    'xero_csv',
+  ])
+  type?: ExportType;
+
+  @ApiPropertyOptional({
+    enum: ['payments', 'customers', 'invoices', 'refunds', 'ledger'],
+    description: 'Legacy alias for type.',
+  })
+  @IsOptional()
+  @IsIn(['payments', 'customers', 'invoices', 'refunds', 'ledger'])
+  resource?: 'payments' | 'customers' | 'invoices' | 'refunds' | 'ledger';
+
+  @ApiPropertyOptional({ enum: ['csv', 'pdf', 'iif'] })
+  @IsOptional()
+  @IsIn(['csv', 'pdf', 'iif'])
+  format?: ExportFormat;
 
   @ApiPropertyOptional({ description: 'Include records created at or after this ISO 8601 date.' })
   @IsOptional()
