@@ -3,19 +3,38 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WEBHOOK_EVENT_TYPES, WebhookEventType } from '../entities/webhook-endpoint.entity';
 import { SUPPORTED_API_VERSIONS, CURRENT_API_VERSION } from '../payload-serializers/registry';
 import { IsObject } from 'class-validator';
+import { IsIn, ValidateIf, MaxLength } from 'class-validator';
 
 export class CreateWebhookEndpointDto {
+  @IsOptional()
+  @IsIn(['http', 'sqs', 'eventbridge'])
+  @ApiPropertyOptional({ enum: ['http', 'sqs', 'eventbridge'], default: 'http' })
+  destinationType?: 'http' | 'sqs' | 'eventbridge';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  @ApiPropertyOptional({ description: 'SQS queue ARN or EventBridge event bus ARN' })
+  destinationArn?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2048)
+  @ApiPropertyOptional({ description: 'Cross-account IAM role ARN' })
+  roleArn?: string;
+
   @IsOptional()
   @IsObject()
   @ApiPropertyOptional({ description: 'Custom static headers. Reserved transport and signature headers are rejected. Use {} to clear.' })
   headers?: Record<string, string>;
 
+  @ValidateIf((dto) => !dto.destinationType || dto.destinationType === 'http' || dto.url !== undefined)
   @IsUrl({ protocols: ['https'], require_protocol: true }, { message: 'url must be a valid HTTPS URL' })
-  @ApiProperty({
-    description: 'HTTPS URL that will receive webhook POST requests',
+  @ApiPropertyOptional({
+    description: 'Required for HTTP destinations; HTTPS URL that receives webhook POST requests',
     example: 'https://merchant.example.com/webhooks',
   })
-  url: string;
+  url?: string;
 
   @IsArray()
   @ArrayNotEmpty({ message: 'At least one event type must be specified' })

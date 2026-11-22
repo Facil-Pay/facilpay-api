@@ -1,5 +1,77 @@
 # API Keys
 
+## Optional signed requests
+
+Set `requireSignedRequests: true` in `POST /v1/api-keys` to receive an independent
+`signingSecret` alongside the one-time API key. Store both securely. The signing
+secret is encrypted at rest with `API_KEY_SIGNING_ENCRYPTION_KEY` and excluded
+from metadata responses. Keep this server encryption key stable across replicas.
+
+`PATCH /v1/api-keys/:id` can enable signing for an existing key. When changing
+from disabled to enabled, the update response includes a new `signingSecret`
+once. Rotating a signed key returns a new API key and signing secret. Disabling
+signing restores ordinary API key authentication.
+
+Signed requests include these headers in addition to API key authentication:
+
+| Header | Format |
+| --- | --- |
+| `X-FacilPay-Timestamp` | Unix timestamp in seconds (10 decimal digits) |
+| `X-FacilPay-Signature` | HMAC-SHA256 digest as 64 hexadecimal characters |
+
+The HMAC key is the independent signing secret, not the API key. The signed
+string joins these four fields with newline characters, without a final newline:
+
+1. Uppercase HTTP method.
+2. Exact request path and query string, including query order and encoding.
+3. The timestamp header exactly as sent.
+4. Lowercase SHA-256 hexadecimal hash of the exact body bytes (empty bytes for no body).
+
+Requests more than five minutes in the past or future are rejected with 401.
+Signatures are compared in constant time. The time window limits replay;
+identical signed requests can be replayed within the window, so payment writes
+should also use their existing idempotency keys. Proxies must preserve the
+request path, query string, and body bytes used by the client. Nest bootstrap
+enables `rawBody` capture for verification.
+
+Node.js signing helper (built-in `node:crypto`, Node.js with `fetch`):
+
+```js
+const { createHash, createHmac } = require('node:crypto');
+
+function signedHeaders({ apiKey, signingSecret, method, path, body = '' }) {
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const hash = createHash('sha256').update(body).digest('hex');
+  const canonical = [method.toUpperCase(), path, timestamp, hash].join('\n');
+  const signature = createHmac('sha256', signingSecret)
+    .update(canonical).digest('hex');
+  return {
+    'X-API-Key': apiKey,
+    'X-FacilPay-Timestamp': timestamp,
+    'X-FacilPay-Signature': signature,
+    'Content-Type': 'application/json',
+  };
+}
+
+const path = '/v1/hooks/subscribe';
+const body = JSON.stringify({
+  url: 'https://hooks.example.com/facilpay',
+  events: ['payment.completed'],
+});
+fetch(`https://api.facilpay.com${path}`, {
+  method: 'POST',
+  headers: signedHeaders({
+    apiKey: process.env.FACILPAY_API_KEY,
+    signingSecret: process.env.FACILPAY_SIGNING_SECRET,
+    method: 'POST', path, body,
+  }),
+  body, // Send exactly the bytes that were signed.
+});
+```
+
+Third-party apps can use scoped, revocable [OAuth authorization](OAUTH.md)
+instead of receiving the merchant's API key.
+
 ## Overview
 
 API keys enable programmatic access to the FacilPay API for merchants. Each API key can be scoped to specific endpoints and configured for sandbox or production environments. Keys support rotation for security purposes without service disruption.

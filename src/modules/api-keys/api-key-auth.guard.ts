@@ -4,6 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
@@ -11,6 +12,8 @@ import { ApiKeysService } from './api-keys.service';
 import { extractClientIp, parseTrustedProxyList } from '../merchants/ip-utils';
 import { REQUIRE_SCOPE_KEY } from './decorators/require-scope.decorator';
 import { UsersService } from '../users/users.service';
+import { verifySignedRequest } from './request-signing';
+import { OAuthService } from '../auth/oauth/oauth.service';
 
 @Injectable()
 export class ApiKeyAuthGuard implements CanActivate {
@@ -21,6 +24,7 @@ export class ApiKeyAuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     configService: ConfigService,
     private readonly usersService: UsersService,
+    @Optional() private readonly oauth?: OAuthService,
   ) {
     this.trustedProxies = parseTrustedProxyList(
       configService.get<string>('TRUSTED_PROXY_IPS'),
@@ -30,12 +34,22 @@ export class ApiKeyAuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
 
+    const authorization = request.headers.authorization;
+    if (typeof authorization === 'string' && authorization.startsWith('Bearer fp_oauth_access_') && this.oauth) {
+      const user = await this.oauth.validateAccessToken(authorization.slice(7));
+      this.oauth.assertScopes(user.scopes, this.reflector.get<string[]>(REQUIRE_SCOPE_KEY, context.getHandler()));
+      request.user = user;
+      return true;
+    }
+
     const plaintext = this.extractKey(request);
     if (!plaintext) {
       throw new UnauthorizedException('Missing API key');
     }
 
-    const apiKey = await this.apiKeysService.validateKey(plaintext);
+    const apiKey = await this.apiKeysService.validateKey(plaintext, extractClientIp(request, this.trustedProxies));
+    if (apiKey.requireSignedRequests) verifySignedRequest(request, apiKey.signingSecretEncrypted);
+    delete (apiKey as Partial<typeof apiKey>).signingSecretEncrypted;
     await this.usersService.assertMerchantActive(apiKey.userId);
     request.apiKey = apiKey;
     request.user = { id: apiKey.userId };

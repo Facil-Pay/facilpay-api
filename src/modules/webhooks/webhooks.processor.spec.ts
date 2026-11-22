@@ -8,6 +8,7 @@ import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
 import { AppLogger } from '../logger/logger.service';
 import { of, throwError } from 'rxjs';
 import { Job } from 'bullmq';
+import { AwsDestinationService } from './aws-destination.service';
 
 describe('WebhooksProcessor', () => {
   let processor: WebhooksProcessor;
@@ -15,8 +16,12 @@ describe('WebhooksProcessor', () => {
   let endpointRepo: any;
   let httpService: any;
   let appLogger: any;
+  let aws: any;
+  let webhooks: any;
 
   beforeEach(async () => {
+    aws = { deliver: jest.fn() };
+    webhooks = { recordDeliverySuccess: jest.fn(), recordDeliveryFailure: jest.fn(), expireSubscription: jest.fn() };
     deliveryRepo = {
       findOne: jest.fn(),
       save: jest.fn(),
@@ -41,7 +46,8 @@ describe('WebhooksProcessor', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhooksProcessor,
-        { provide: WebhooksService, useValue: { recordDeliverySuccess: jest.fn(), recordDeliveryFailure: jest.fn() } },
+        { provide: WebhooksService, useValue: webhooks },
+        { provide: AwsDestinationService, useValue: aws },
         { provide: getRepositoryToken(WebhookDelivery), useValue: deliveryRepo },
         { provide: getRepositoryToken(WebhookEndpoint), useValue: endpointRepo },
         { provide: HttpService, useValue: httpService },
@@ -54,6 +60,29 @@ describe('WebhooksProcessor', () => {
 
   it('should be defined', () => {
     expect(processor).toBeDefined();
+  });
+
+  it('logs AWS failures and throws so BullMQ retries them', async () => {
+    const delivery = new WebhookDelivery();
+    deliveryRepo.findOne.mockResolvedValue(delivery);
+    endpointRepo.findOne.mockResolvedValue({ secret: 'secret', destinationType: 'sqs' });
+    aws.deliver.mockRejectedValue(new Error('AWS denied'));
+    const job = { data: { deliveryId: 'd1', endpointId: 'e1', payload: {} }, attemptsMade: 0, opts: { attempts: 6 } } as any;
+    await expect(processor.process(job)).rejects.toThrow('AWS denied');
+    expect(delivery).toMatchObject({ status: WebhookDeliveryStatus.FAILED, attempts: 1, lastError: 'AWS denied' });
+    expect(httpService.post).not.toHaveBeenCalled();
+  });
+
+  it('unsubscribes REST hooks on 410 and retains the final delivery log without retrying', async () => {
+    const delivery = new WebhookDelivery();
+    deliveryRepo.findOne.mockResolvedValue(delivery);
+    endpointRepo.findOne.mockResolvedValue({ secret: 'secret', isRestHook: true });
+    httpService.post.mockReturnValue(throwError(() => ({ response: { status: 410, data: 'Gone' } })));
+    const job = { data: { deliveryId: 'd1', endpointId: 'e1', payload: {} }, attemptsMade: 0, opts: { attempts: 6 } } as any;
+    await expect(processor.process(job)).resolves.toMatchObject({ unsubscribed: true });
+    expect(webhooks.expireSubscription).toHaveBeenCalledWith('e1');
+    expect(delivery).toMatchObject({ status: WebhookDeliveryStatus.DEAD_LETTER, lastResponseCode: 410 });
+    expect(webhooks.recordDeliveryFailure).not.toHaveBeenCalled();
   });
 
   it('should successfully deliver a webhook', async () => {

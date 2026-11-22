@@ -656,3 +656,94 @@ Ownership is enforced at the service layer — merchants can only create, view, 
 | **ADMIN**  | Yes                  |
 | **USER**   | Yes                  |
 
+## Amazon SQS and EventBridge destinations
+
+`POST /v1/webhooks` also accepts `destinationType: "sqs"` or `"eventbridge"`.
+Existing endpoints default to `http`. AWS destinations use `destinationArn` and
+`roleArn` instead of `url`; custom HTTP headers are not supported for AWS.
+
+```json
+{
+  "destinationType": "sqs",
+  "destinationArn": "arn:aws:sqs:eu-west-1:123456789012:facilpay-events",
+  "roleArn": "arn:aws:iam::123456789012:role/FacilPayEvents",
+  "events": ["payment.completed", "refund.issued"],
+  "apiVersion": "2026-10-01"
+}
+```
+
+For EventBridge, set `destinationType` to `eventbridge` and `destinationArn` to
+`arn:aws:events:eu-west-1:123456789012:event-bus/merchant-events`.
+The role and destination must be in the same AWS account. This implementation
+supports the commercial `aws` partition. Region is derived from the ARN.
+
+The merchant role must trust the FacilPay deployment's AWS principal to call
+`sts:AssumeRole`, with `sts:ExternalId` equal to the merchant's FacilPay ID:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": { "AWS": "arn:aws:iam::<FACILPAY_ACCOUNT_ID>:role/<FACILPAY_RUNTIME_ROLE>" },
+    "Action": "sts:AssumeRole",
+    "Condition": { "StringEquals": { "sts:ExternalId": "<FACILPAY_MERCHANT_ID>" } }
+  }]
+}
+```
+
+Grant the merchant role `sqs:SendMessage` on the queue, or `events:PutEvents` on
+the event bus. The FacilPay runtime role also needs `sts:AssumeRole` permission
+for the merchant role. Use deployment IAM credentials through the AWS SDK's
+default credential provider chain; no merchant AWS credentials are stored.
+
+Filtering and `apiVersion` serialization happen before queuing, exactly as for
+HTTP webhooks. SQS receives the serialized payload as its message body.
+EventBridge wraps it in `Detail`, uses source `com.facilpay`, and sets `DetailType`
+to the event name. FIFO queues use the merchant ID as `MessageGroupId` and a
+stable delivery-based deduplication ID. Consumers must still handle duplicates.
+
+AWS failures use the same six delivery attempts, exponential backoff, dead-letter
+status, manual retry, and `GET /v1/webhooks/:id/deliveries` logs. EventBridge
+per-entry errors count as failures even if its HTTP response is 200.
+Use `PATCH /v1/webhooks/:id` to update the role or destination ARN.
+
+## REST hooks for Zapier and other no-code tools
+
+REST hooks use API keys with `webhooks:write` for subscribe/unsubscribe and
+`webhooks:read` for samples. Scoped OAuth access tokens can also be used.
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/v1/hooks/subscribe` | Create a subscription and return its `id` |
+| DELETE | `/v1/hooks/:id` | Remove an owned REST hook subscription (204) |
+| GET | `/v1/hooks/samples/:eventType?apiVersion=2026-10-01` | Trigger samples / recent events |
+
+```http
+POST /v1/hooks/subscribe
+X-API-Key: <merchant-api-key>
+Content-Type: application/json
+
+{
+  "url": "https://hooks.zapier.com/hooks/catch/example/trigger/",
+  "events": ["payment.completed"],
+  "apiVersion": "2026-10-01"
+}
+```
+
+Configure the no-code integration to pass its callback URL as `url`, persist the
+returned `id`, and call DELETE when the user disconnects. REST hooks share the
+webhook queue, signatures, filters, payload versions, retries, and delivery logs.
+HTTP 410 Gone automatically unsubscribes and stops retries. An inactive
+`rest_hook_gone` tombstone preserves its delivery history; create a new
+subscription to reconnect. Other failures follow normal webhook retry rules.
+
+The sample endpoint accepts every event type listed above. It returns up to 20
+recent events belonging to the authenticated merchant, newest first, with a
+stable top-level `id` for deduplication. Without history it returns a deterministic
+sample with `data.sample: true`. Use it for trigger setup; polling integrations
+should deduplicate by `id` and ignore these synthetic samples. The existing event
+history retention and twenty-event polling window apply.
+
+For OAuth setup and supported delegated endpoints, see [OAUTH.md](OAUTH.md).
+

@@ -8,10 +8,16 @@ import {
   MaxLength,
   IsArray,
   Matches,
+  IsBoolean,
 } from 'class-validator';
 import { ApiKeyScope } from '../api-key.entity';
 
 export class UpdateApiKeyDto {
+  @ApiPropertyOptional({ description: 'Enable or disable signing. Enabling returns a new signingSecret once in the update response.' })
+  @IsOptional()
+  @IsBoolean()
+  requireSignedRequests?: boolean;
+
   @ApiPropertyOptional({ description: 'New name for the API key', example: 'Renamed key' })
   @IsString()
   @IsOptional()

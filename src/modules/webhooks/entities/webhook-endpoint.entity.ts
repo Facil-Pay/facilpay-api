@@ -52,6 +52,22 @@ export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
 @Entity('webhook_endpoints')
 @Index('idx_webhook_endpoints_merchant', ['merchantId'])
 export class WebhookEndpoint {
+  @Column({ type: 'varchar', length: 20, default: 'http' })
+  @ApiProperty({ enum: ['http', 'sqs', 'eventbridge'], default: 'http' })
+  destinationType: 'http' | 'sqs' | 'eventbridge';
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  @ApiPropertyOptional({ description: 'SQS queue ARN or EventBridge event bus ARN' })
+  destinationArn: string | null;
+
+  @Column({ type: 'varchar', length: 2048, nullable: true })
+  @ApiPropertyOptional({ description: 'Cross-account IAM role; trust policy must require merchant ID as sts:ExternalId' })
+  roleArn: string | null;
+
+  @Column({ default: false })
+  @ApiProperty({ description: 'REST hook subscription; unsubscribed automatically on HTTP 410' })
+  isRestHook: boolean;
+
   @Column({ type: 'jsonb', nullable: true, transformer: encryptedHeadersTransformer })
   @ApiPropertyOptional({ description: 'Custom delivery headers; values are masked in responses' })
   headers: Record<string, string> | null;

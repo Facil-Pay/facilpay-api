@@ -28,6 +28,9 @@
     "docker:migrate": "docker compose run --rm api migrate"
   },
   "dependencies": {
+    "@aws-sdk/client-eventbridge": "^3.0.0",
+    "@aws-sdk/client-sqs": "^3.0.0",
+    "@aws-sdk/client-sts": "^3.0.0",
     "@nestjs-modules/mailer": "^2.3.7",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bullmq": "^11.0.4",

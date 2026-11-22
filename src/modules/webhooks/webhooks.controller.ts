@@ -40,6 +40,7 @@ import { ConfigService } from '@nestjs/config';
 import { ReplayWebhooksDto } from './dto/replay-webhooks.dto';
 import { ListWebhookDeliveriesDto } from './dto/list-webhook-deliveries.dto';
 import { RotateWebhookSecretDto } from './dto/rotate-webhook-secret.dto';
+import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 
 @ApiTags('webhooks')
 @ApiBearerAuth('bearer')
@@ -53,8 +54,9 @@ export class WebhooksController {
   ) { }
 
   @Post()
+  @RequireScope('webhooks:write')
   @ApiOperation({
-    summary: 'Register a webhook endpoint',
+    summary: 'Register an HTTP, SQS or EventBridge event destination',
     description:
       'Registers a new webhook URL and returns it with a generated signing secret. ' +
       'Use the secret to verify incoming payloads by checking the `X-FacilPay-Signature` header ' +
@@ -98,6 +100,7 @@ export class WebhooksController {
   }
 
   @Get()
+  @RequireScope('webhooks:read')
   @ApiOperation({
     summary: 'List registered webhook endpoints',
     description: "Returns all webhook endpoints belonging to the authenticated merchant.",
@@ -126,6 +129,7 @@ export class WebhooksController {
   }
 
   @Patch(':id')
+  @RequireScope('webhooks:write')
   @ApiOperation({
     summary: 'Update a webhook endpoint',
     description: 'Update the URL, event subscriptions, or active status of an existing endpoint. Only the owning merchant may update.',
@@ -178,6 +182,7 @@ export class WebhooksController {
   }
 
   @Delete(':id')
+  @RequireScope('webhooks:write')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a webhook endpoint',
@@ -205,6 +210,7 @@ export class WebhooksController {
   }
 
   @Post(':id/test')
+  @RequireScope('webhooks:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Send a test event to a webhook endpoint',
@@ -371,12 +377,14 @@ export class WebhooksController {
   }
 
   @Get(':id/stats')
+  @RequireScope('webhooks:read')
   @ApiOperation({ summary: 'Delivery health over 24 hours and 7 days', description: 'Success rate is a fraction of attempted deliveries. Latencies are milliseconds for the latest attempt per delivery; pending deliveries are excluded. Cached for 60 seconds.' })
   getStats(@Param('id') id: string, @CurrentUser() user: User) {
     return this.webhooksService.getStats(id, user.id);
   }
 
   @Get(':id/deliveries')
+  @RequireScope('webhooks:read')
   @ApiOperation({
     summary: 'List delivery attempts for a webhook endpoint',
     description:

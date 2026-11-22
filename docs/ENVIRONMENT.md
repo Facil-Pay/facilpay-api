@@ -139,6 +139,25 @@ used for IP allowlist / geo-restriction checks.
 
 ## Webhooks
 
+AWS destinations use the AWS SDK default credential provider chain (prefer a
+deployment IAM role). The runtime principal must have `sts:AssumeRole` permission
+on configured merchant roles. See [WEBHOOKS.md](WEBHOOKS.md) for trust policies,
+merchant-specific external IDs, and required queue/event-bus permissions.
+
+## API request signing
+
+| Variable | Description | Default | Required | Example |
+| --- | --- | --- | --- | --- |
+| `API_KEY_SIGNING_ENCRYPTION_KEY` | Stable, high-entropy secret used to encrypt independent API-key signing secrets with AES-256-GCM | *(none)* | When creating, enabling, rotating, or verifying signed keys | secret-manager supplied random value |
+
+Keep the same encryption key on every API/worker replica and preserve it across
+deployments. Ordinary unsigned keys do not require this variable. Changing the
+encryption key requires re-encrypting existing secrets or issuing replacement
+keys. OAuth uses the existing database and merchant-session authentication;
+it introduces no separate signing or encryption environment variables.
+
+## Webhook signing
+
 | Variable | Description | Default | Required | Example |
 | --- | --- | --- | --- | --- |
 | `WEBHOOK_SECRET` | Secret used for HMAC webhook signature verification | *(placeholder)* | **Yes** | a long random string |

@@ -3,8 +3,21 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { WEBHOOK_EVENT_TYPES, WebhookEventType } from '../entities/webhook-endpoint.entity';
 import { SUPPORTED_API_VERSIONS, CURRENT_API_VERSION } from '../payload-serializers/registry';
 import { IsObject } from 'class-validator';
+import { IsIn, MaxLength } from 'class-validator';
 
 export class UpdateWebhookEndpointDto {
+  @IsOptional() @IsIn(['http', 'sqs', 'eventbridge'])
+  @ApiPropertyOptional({ enum: ['http', 'sqs', 'eventbridge'] })
+  destinationType?: 'http' | 'sqs' | 'eventbridge';
+
+  @IsOptional() @IsString() @MaxLength(2048)
+  @ApiPropertyOptional({ description: 'Replacement SQS queue or EventBridge bus ARN' })
+  destinationArn?: string;
+
+  @IsOptional() @IsString() @MaxLength(2048)
+  @ApiPropertyOptional({ description: 'Replacement cross-account IAM role ARN' })
+  roleArn?: string;
+
   @IsOptional()
   @IsObject()
   @ApiPropertyOptional({ description: 'Replacement custom headers; use {} to clear' })
