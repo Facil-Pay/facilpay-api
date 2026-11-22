@@ -50,6 +50,29 @@ describe('Anchors SEP-24 (e2e)', () => {
     await ds.getRepository(AnchorConfig).delete({});
   });
 
+  describe('SEP-31 receiving', () => {
+    it('serves the public SEP-31 asset information document', async () => {
+      const { body } = await request(app.getHttpServer())
+        .get('/v1/sep31/info')
+        .expect(200);
+
+      expect(body.receive).toBeDefined();
+      expect(Object.keys(body.receive).length).toBeGreaterThan(0);
+    });
+
+    it('requires an authenticated sending anchor to create a transaction', async () => {
+      await request(app.getHttpServer())
+        .post('/v1/sep31/transactions')
+        .send({
+          amount: '25.00',
+          asset_code: 'XLM',
+          sender_id: '00000000-0000-0000-0000-000000000001',
+          receiver_id: '00000000-0000-0000-0000-000000000002',
+        })
+        .expect(403);
+    });
+  });
+
   // ── Anchor config ─────────────────────────────────────────────────────────
 
   describe('GET /v1/anchors/configs', () => {

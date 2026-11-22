@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -155,6 +156,7 @@ export class Sep10Service {
       } else {
         throw new Error('Expected a Transaction envelope');
       }
+
     } catch (error) {
       throw new BadRequestException(
         `Invalid challenge transaction: ${error instanceof Error ? error.message : String(error)}`,
@@ -267,6 +269,38 @@ export class Sep10Service {
       user: unknown;
       stellarAccount: string;
     };
+  }
+
+  async verifySep10Token(token: string): Promise<string> {
+    let payload: { sub?: string };
+    try {
+      payload = await this.jwtService.verifyAsync<{ sub?: string }>(token);
+    } catch {
+      throw new UnauthorizedException('Invalid SEP-10 bearer token');
+    }
+    if (!payload.sub) {
+      throw new UnauthorizedException('Invalid SEP-10 bearer token');
+    }
+    const user = await this.usersService.findByIdWithSecrets(payload.sub);
+    const marker = '@stellar.sep10.local';
+    if (
+      !user ||
+      !user.isActive ||
+      user.status !== 'ACTIVE' ||
+      user.deletedAt ||
+      !user.email.toLowerCase().endsWith(marker)
+    ) {
+      throw new ForbiddenException(
+        'A SEP-10 authenticated sending anchor is required',
+      );
+    }
+    const account = user.email.slice(0, -marker.length).toUpperCase();
+    if (!StellarSdk.StrKey.isValidEd25519PublicKey(account)) {
+      throw new ForbiddenException(
+        'The SEP-10 account associated with this token is invalid',
+      );
+    }
+    return account;
   }
 
   private hasSignatureFrom(tx: StellarSdk.Transaction, accountId: string): boolean {
