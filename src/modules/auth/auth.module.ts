@@ -1,3 +1,5 @@
+import { SamlController } from './saml.controller';
+import { SamlService } from './saml.service';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -40,6 +42,7 @@ import { Session } from './entities/session.entity';
     MerchantsModule,
     TypeOrmModule.forFeature([
       RefreshToken,
+      LoginEvent,
       PasswordResetToken,
       PasswordHistory,
       Role,
@@ -59,9 +62,12 @@ import { Session } from './entities/session.entity';
       inject: [ConfigService],
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, SamlController],
   providers: [
     AuthService,
+    SamlService,
+    WebAuthnService,
+    LoginAlertsService,
     JwtStrategy,
     JwtAuthGuard,
     RolesGuard,

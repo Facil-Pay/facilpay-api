@@ -1,8 +1,21 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsBoolean, IsArray, IsInt, Min, Max, ArrayMinSize, ArrayMaxSize, IsTimeZone, IsObject, IsNumber, ValidateIf } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export class UpdateSettingsDto {
+  @ApiPropertyOptional({ nullable: true, minimum: 8, maximum: 3650, description: 'Revoke inactive API keys after this many days; null disables (default).' })
+  @ValidateIf((_object, value) => value !== undefined && value !== null)
+  @IsInt()
+  @Min(8)
+  @Max(3650)
+  apiKeyInactivityDays?: number | null;
+
+  @ApiPropertyOptional({ default: false, description: 'Require TOTP or a passkey for every team member. Owner must enroll first.' })
+  @ValidateIf((_object, value) => value !== undefined)
+  @IsBoolean()
+  @Transform(({ obj }) => obj.require2fa)
+  require2fa?: boolean;
+
   @ApiPropertyOptional({ description: 'Enable or disable invoice reminders', default: true })
   @IsOptional()
   @IsBoolean()

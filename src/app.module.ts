@@ -1,3 +1,8 @@
+import { MetricsModule } from './modules/metrics/metrics.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { HttpMetricsMiddleware } from './modules/metrics/http-metrics.middleware';
+import { RequestLogsModule } from './modules/request-logs/request-logs.module';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DatabaseModule } from './modules/database/database.module';
@@ -39,6 +44,8 @@ import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
+    RequestLogsModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({

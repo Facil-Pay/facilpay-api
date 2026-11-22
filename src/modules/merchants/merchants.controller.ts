@@ -11,6 +11,9 @@ import {
   ApiForbiddenResponse,
   ApiConsumes,
 } from '@nestjs/swagger';
+import { MerchantSecurityService } from './merchant-security.service';
+import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { MerchantsService } from './merchants.service';
 import { UpdateGeoRestrictionsDto } from './dto/update-geo-restrictions.dto';
 import { UpdateIpAllowlistDto } from './dto/update-ip-allowlist.dto';
@@ -35,6 +38,7 @@ import { UserRole } from '../../common/constants/roles';
 export class MerchantsController {
   constructor(
     private readonly merchantsService: MerchantsService,
+    private readonly security: MerchantSecurityService,
     private readonly merchantLimitsService: MerchantLimitsService,
   ) {}
 
@@ -292,7 +296,7 @@ export class MerchantsController {
   async getSettings(
     @CurrentUser() user: User,
   ): Promise<MerchantSettings | object> {
-    const settings = await this.merchantsService.getSettings(user.id);
+    const settings = await this.security.getSettings(user.id);
     if (!settings) {
       return {
         merchantId: user.id,
@@ -328,6 +332,6 @@ export class MerchantsController {
     @Body() dto: UpdateSettingsDto,
     @CurrentUser() user: User,
   ): Promise<MerchantSettings> {
-    return this.merchantsService.upsertSettings(user.id, dto);
+    return this.security.upsertSettings(user.id, dto);
   }
 }

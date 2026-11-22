@@ -421,3 +421,14 @@ backupCodes       TEXT[]    -- Array of bcrypt-hashed backup codes (nullable)
 ```
 
 Migration: `1706000000003-AddTwoFactorColumnsToUsers.ts`
+
+
+## Require 2FA for a merchant team
+
+PATCH /v1/merchants/me/settings with { "require2fa": true } to require enrollment for the owner and every current or future member. GET the same endpoint to read the policy. The default is false. The owner must first enable TOTP or register a passkey; otherwise enabling is rejected. Affected members are notified by email when the policy transitions to enabled.
+
+Members without TOTP or a registered passkey receive 403 with code two_factor_setup_required on authenticated requests. Only POST /v1/auth/2fa/enable, POST /v1/auth/2fa/verify, and the POST /v1/auth/webauthn/registration/options and /verify endpoints remain accessible. Restrictions apply through the shared JWT strategy, including SSE. Setup, challenge and step-up tokens cannot be used as ordinary access tokens.
+
+Passkeys count as a second factor. Users cannot remove their last factor while any team requires 2FA. SAML authentication does not replace local enrollment. API keys remain server-to-server credentials and are not subject to interactive enrollment.
+
+Schema: migration 1795300000000-AddMerchantSecurityPolicies. Coverage: merchant-security.service.spec.ts and test/merchant-security.e2e-spec.ts. Tests and migrations were not run during the edit-only implementation.

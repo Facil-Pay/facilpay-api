@@ -35,6 +35,9 @@ import * as qrcode from 'qrcode';
 import { UsersService } from '../users/users.service';
 import { AppLogger } from '../logger/logger.service';
 import { Logger } from 'pino';
+import { MerchantSettings } from '../merchants/entities/merchant-settings.entity';
+import { MerchantSamlConfig } from './entities/merchant-saml-config.entity';
+import { MerchantMember } from '../team/entities/merchant-member.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { Role } from './entities/role.entity';
@@ -194,6 +197,8 @@ export class AuthService {
       );
     }
 
+    await this.assertPasswordLoginAllowed(user.id);
+
     const isPasswordValid = await bcrypt.compare(
       loginDto.password,
       user.password,
@@ -311,7 +316,22 @@ export class AuthService {
     ) {
       throw new UnauthorizedException('Passkey login is not available for this account');
     }
+    await this.assertPasswordLoginAllowed(user.id);
     return this.completeLogin(user, ipAddress, userAgent, deviceId);
+  }
+
+  private async assertPasswordLoginAllowed(userId: string): Promise<void> {
+    const memberships = await this.dataSource.getRepository(MerchantMember).findBy({ userId });
+    for (const merchantId of [userId, ...memberships.map(member => member.merchantId)]) {
+      if (await this.dataSource.getRepository(MerchantSamlConfig).existsBy({ merchantId, requireSso: true })) {
+        throw new ForbiddenException('Your merchant team requires SAML SSO');
+      }
+    }
+  }
+
+  async completeSsoLogin(user: User, ipAddress?: string, userAgent?: string) {
+    if (!user.isActive || user.deletedAt || user.status === 'SUSPENDED') throw new ForbiddenException('Account is unavailable');
+    return this.completeLogin(user, ipAddress, userAgent);
   }
 
   private async completeLogin(
@@ -520,6 +540,13 @@ export class AuthService {
     // Reset lockout counter on successful password verification
     await this.usersService.resetFailedLoginAttempts(user.id);
 
+    const memberships = await this.dataSource.getRepository(MerchantMember).findBy({ userId });
+    for (const merchantId of [userId, ...memberships.map(member => member.merchantId)]) {
+      if (await this.dataSource.getRepository(MerchantSettings).existsBy({ merchantId, require2fa: true }) &&
+        !await this.webAuthnService.hasCredentials(userId)) {
+        throw new ForbiddenException('Your merchant team requires at least one second factor');
+      }
+    }
     await this.usersService.disableTwoFactor(user.id);
 
     await this.auditLogsService.record({
