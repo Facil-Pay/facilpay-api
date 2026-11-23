@@ -52,6 +52,7 @@ describe('ApiKeysService', () => {
             find: jest.fn(),
             findOne: jest.fn(),
             delete: jest.fn(),
+            update: jest.fn().mockResolvedValue({ affected: 1 }),
         };
 
         apiKeyUsageRepository = {
@@ -87,6 +88,23 @@ describe('ApiKeysService', () => {
 
     it('should be defined', () => {
         expect(service).toBeDefined();
+    });
+
+    describe('validateKey inactivity tracking', () => {
+        it('updates last-used tracking and clears a pending inactivity warning', async () => {
+            apiKeyRepository.findOne.mockResolvedValue({ id: 'key', userId: 'owner', isActive: true, expiresAt: null, allowedIps: [] });
+            await service.validateKey('plaintext');
+            expect(apiKeyRepository.update).toHaveBeenCalledWith({ id: 'key', isActive: true }, {
+                lastUsedAt: expect.any(Date), inactivityWarningAt: null, inactivityRevokeAt: null,
+            });
+            expect(apiKeyRepository.save).not.toHaveBeenCalled();
+        });
+        it('rejects a key revoked concurrently without reactivating it', async () => {
+            apiKeyRepository.findOne.mockResolvedValue({ id: 'key', isActive: true, expiresAt: null, allowedIps: [] });
+            apiKeyRepository.update.mockResolvedValue({ affected: 0 });
+            await expect(service.validateKey('plaintext')).rejects.toThrow('Invalid API key');
+            expect(apiKeyRepository.save).not.toHaveBeenCalled();
+        });
     });
 
     describe('update', () => {

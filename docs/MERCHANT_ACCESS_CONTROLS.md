@@ -224,3 +224,10 @@ Misconfiguring the IP allowlist will immediately block your server and API keys 
 
 4. **Recovering from a Lockout**:
    - If you lock your service out, submit a `PATCH /v1/merchants/me/ip-allowlist` with `{"allowedIps": []}` from the FacilPay Web Merchant Dashboard (which authenticates through session cookies rather than the API allowlist).
+
+
+## Merchant security policies
+
+GET and PATCH /v1/merchants/me/settings expose apiKeyInactivityDays (null by default) and require2fa (false by default). See [API key inactivity](API_KEY_INACTIVITY.md) and [team 2FA](TWO_FACTOR_AUTH.md) for enrollment, notifications and revocation behavior.
+
+Enterprise teams can configure [SAML SSO](SAML_SSO.md) with per-merchant IdP metadata XML, an email domain, JIT role, and optional mandatory SSO. Developers can inspect [redacted API request logs](REQUEST_LOGS.md) for the last 30 days.

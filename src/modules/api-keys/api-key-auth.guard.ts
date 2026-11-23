@@ -48,8 +48,6 @@ export class ApiKeyAuthGuard implements CanActivate {
     }
 
     const apiKey = await this.apiKeysService.validateKey(plaintext, extractClientIp(request, this.trustedProxies));
-    if (apiKey.requireSignedRequests) verifySignedRequest(request, apiKey.signingSecretEncrypted);
-    delete (apiKey as Partial<typeof apiKey>).signingSecretEncrypted;
     await this.usersService.assertMerchantActive(apiKey.userId);
     request.apiKey = apiKey;
     request.user = { id: apiKey.userId };

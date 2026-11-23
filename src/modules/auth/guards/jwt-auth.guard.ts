@@ -4,29 +4,11 @@ import { REQUIRE_SCOPE_KEY } from '../../api-keys/decorators/require-scope.decor
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-
 @Injectable()
 export class JwtAuthGuard extends AuthGuard('jwt') {
-  constructor(private reflector: Reflector, @Optional() private readonly oauth?: OAuthService) {
-    super();
-  }
-
+  constructor(private reflector: Reflector) { super(); }
   canActivate(context: ExecutionContext) {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-
-    if (isPublic) {
-      return true;
-    }
-
-    const request = context.switchToHttp().getRequest();
-    const authorization = request.headers.authorization;
-    if (typeof authorization === 'string' && authorization.startsWith('Bearer fp_oauth_access_') && this.oauth) {
-      return this.authorizeOAuth(context, authorization.slice(7));
-    }
-
+    if (this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()])) return true;
     return super.canActivate(context);
   }
 

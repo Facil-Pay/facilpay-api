@@ -70,7 +70,9 @@
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "swagger-ui-express": "^5.0.1",
-    "typeorm": "^0.3.28"
+    "typeorm": "^0.3.28",
+    "@node-saml/node-saml": "^5.1.0",
+    "@xmldom/xmldom": "^0.8.11"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
@@ -98,6 +100,7 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
-    "typescript-eslint": "^8.20.0"
+    "typescript-eslint": "^8.20.0",
+    "xml-crypto": "^6.1.2"
   }
 }

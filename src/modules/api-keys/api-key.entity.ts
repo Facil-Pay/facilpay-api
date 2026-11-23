@@ -81,6 +81,12 @@ export class ApiKey {
   @ApiPropertyOptional({ example: '2026-06-28T10:00:00.000Z' })
   lastUsedAt: Date | null;
 
+  @Column({ type: 'timestamptz', nullable: true })
+  inactivityWarningAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  inactivityRevokeAt: Date | null;
+
   @Column({ default: true })
   @ApiProperty({ example: true })
   isActive: boolean;
