@@ -62,6 +62,56 @@ describe('InvoicesService', () => {
     expect(repository.save).not.toHaveBeenCalled();
   });
 
+  describe('markUncollectible', () => {
+    it('marks OPEN invoice as uncollectible', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.OPEN });
+      repository.findOne.mockResolvedValue(invoice);
+
+      const result = await service.markUncollectible('merchant-id', 'invoice-id');
+
+      expect(result.status).toBe(InvoiceStatus.UNCOLLECTIBLE);
+      expect(repository.save).toHaveBeenCalledWith(expect.objectContaining({
+        status: InvoiceStatus.UNCOLLECTIBLE,
+      }));
+      expect(webhooksService.dispatchEventToMerchant).toHaveBeenCalledWith(
+        'merchant-id',
+        'invoice.marked_uncollectible',
+        expect.any(Object),
+      );
+    });
+
+    it('marks OVERDUE invoice as uncollectible', async () => {
+      const invoice = makeInvoice({ status: InvoiceStatus.OVERDUE });
+      repository.findOne.mockResolvedValue(invoice);
+
+      const result = await service.markUncollectible('merchant-id', 'invoice-id');
+
+      expect(result.status).toBe(InvoiceStatus.UNCOLLECTIBLE);
+      expect(repository.save).toHaveBeenCalled();
+    });
+
+    it('rejects marking PAID invoice as uncollectible', async () => {
+      repository.findOne.mockResolvedValue(makeInvoice({ status: InvoiceStatus.PAID }));
+
+      await expect(service.markUncollectible('merchant-id', 'invoice-id'))
+        .rejects.toThrow(ConflictException);
+    });
+
+    it('rejects marking DRAFT invoice as uncollectible', async () => {
+      repository.findOne.mockResolvedValue(makeInvoice({ status: InvoiceStatus.DRAFT }));
+
+      await expect(service.markUncollectible('merchant-id', 'invoice-id'))
+        .rejects.toThrow(ConflictException);
+    });
+
+    it('rejects marking VOID invoice as uncollectible', async () => {
+      repository.findOne.mockResolvedValue(makeInvoice({ status: InvoiceStatus.VOID }));
+
+      await expect(service.markUncollectible('merchant-id', 'invoice-id'))
+        .rejects.toThrow(ConflictException);
+    });
+  });
+
   it('allocates sequential invoice numbers under a merchant transaction lock', async () => {
     const savedInvoices: any[] = [];
     const queryRunner = {

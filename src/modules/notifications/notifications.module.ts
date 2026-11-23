@@ -21,6 +21,11 @@ import { NotificationPreference } from './notification-preference.entity';
 import { NotificationPreferencesService } from './notification-preferences.service';
 import { NotificationPreferencesController } from './notification-preferences.controller';
 import { SlackNotificationService } from './slack-notification.service';
+import { PhoneVerification } from './phone-verification.entity';
+import { SmsNotificationService } from './sms-notification.service';
+import { PhoneVerificationController } from './phone-verification.controller';
+import { TwilioSmsProvider } from './providers/twilio-sms.provider';
+import { MockSmsProvider } from './providers/mock-sms.provider';
 
 @Module({
   imports: [
@@ -29,6 +34,7 @@ import { SlackNotificationService } from './slack-notification.service';
       EmailSuppression,
       InAppNotification,
       NotificationPreference,
+      PhoneVerification,
     ]),
     BullModule.registerQueue({
       name: 'emails',
@@ -67,6 +73,7 @@ import { SlackNotificationService } from './slack-notification.service';
     AdminEmailSuppressionsController,
     InAppNotificationsController,
     NotificationPreferencesController,
+    PhoneVerificationController,
   ],
   providers: [
     EmailService,
@@ -76,6 +83,17 @@ import { SlackNotificationService } from './slack-notification.service';
     InAppNotificationsService,
     NotificationPreferencesService,
     SlackNotificationService,
+    SmsNotificationService,
+    {
+      provide: 'SMS_PROVIDER',
+      useFactory: (configService: ConfigService) => {
+        const useMock = configService.get<string>('SMS_PROVIDER') === 'mock';
+        return useMock
+          ? new MockSmsProvider()
+          : new TwilioSmsProvider(configService);
+      },
+      inject: [ConfigService],
+    },
   ],
   exports: [
     EmailService,
@@ -84,6 +102,7 @@ import { SlackNotificationService } from './slack-notification.service';
     InAppNotificationsService,
     NotificationPreferencesService,
     SlackNotificationService,
+    SmsNotificationService,
   ],
 })
 export class NotificationsModule {}
