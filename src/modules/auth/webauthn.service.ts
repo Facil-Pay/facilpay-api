@@ -1,8 +1,11 @@
 import {
   Injectable,
+  ForbiddenException,
+  Optional,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { MerchantSecurityService } from '../merchants/merchant-security.service';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -38,6 +41,7 @@ export class WebAuthnService {
     private readonly userRepository: Repository<User>,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Optional() private readonly security?: MerchantSecurityService,
   ) {}
 
   async hasCredentials(userId: string): Promise<boolean> {
@@ -240,6 +244,12 @@ export class WebAuthnService {
   }
 
   async deleteCredential(userId: string, credentialId: string): Promise<void> {
+    if (this.security && await this.security.requiresSecondFactor(userId)) {
+      const user = await this.userRepository.findOneBy({ id: userId });
+      if (!user?.twoFactorEnabled && await this.credentialRepository.countBy({ userId }) <= 1) {
+        throw new ForbiddenException('Your merchant team requires at least one second factor');
+      }
+    }
     const result = await this.credentialRepository.delete({
       id: credentialId,
       userId,

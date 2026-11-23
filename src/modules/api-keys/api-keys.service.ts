@@ -211,7 +211,10 @@ export class ApiKeysService {
     }
 
     key.lastUsedAt = new Date();
-    await this.apiKeyRepository.save(key);
+    const touched = await this.apiKeyRepository.update({ id: key.id, isActive: true }, {
+      lastUsedAt: key.lastUsedAt, inactivityWarningAt: null, inactivityRevokeAt: null,
+    });
+    if (!touched.affected) throw new UnauthorizedException('Invalid API key');
 
     return key;
   }

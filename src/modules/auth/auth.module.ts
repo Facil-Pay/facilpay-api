@@ -1,3 +1,5 @@
+import { SamlController } from './saml.controller';
+import { SamlService } from './saml.service';
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
@@ -64,9 +66,12 @@ import { Sep10Service } from './sep10.service';
       inject: [ConfigService],
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, SamlController],
   providers: [
     AuthService,
+    SamlService,
+    WebAuthnService,
+    LoginAlertsService,
     GoogleOidcService,
     Sep10Service,
     JwtStrategy,

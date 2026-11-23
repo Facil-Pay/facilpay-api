@@ -35,7 +35,6 @@ import { DataSource } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import * as otplib from 'otplib';
 import { PasswordStrengthService } from './password-strength.service';
-
 import { AuditLogsService } from '../audit-logs/audit-logs.service';
 import { WebAuthnService } from './webauthn.service';
 import { GeoLookupService } from '../merchants/geo-lookup.service';
@@ -97,6 +96,7 @@ describe('AuthService', () => {
   };
 
   const mockDataSource = {
+    getRepository: jest.fn(() => ({ findBy: jest.fn().mockResolvedValue([]), existsBy: jest.fn().mockResolvedValue(false) })),
     transaction: jest.fn(<T>(cb: (manager: typeof mockManager) => Promise<T>) =>
       cb(mockManager),
     ),
@@ -121,7 +121,7 @@ describe('AuthService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
-        { provide: LoginHistoryService, useValue: { record: jest.fn() } },
+        { provide: LoginHistoryService, useValue: { record: jest.fn().mockResolvedValue({}) } },
         {
           provide: UsersService,
           useValue: mockUsersService,

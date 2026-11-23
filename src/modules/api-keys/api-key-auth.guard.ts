@@ -35,7 +35,7 @@ export class ApiKeyAuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing API key');
     }
 
-    const apiKey = await this.apiKeysService.validateKey(plaintext);
+    const apiKey = await this.apiKeysService.validateKey(plaintext, extractClientIp(request, this.trustedProxies));
     await this.usersService.assertMerchantActive(apiKey.userId);
     request.apiKey = apiKey;
     request.user = { id: apiKey.userId };
