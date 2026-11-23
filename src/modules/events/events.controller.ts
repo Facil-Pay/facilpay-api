@@ -5,11 +5,13 @@ import { Event } from './entities/event.entity';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
+import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 
 @ApiTags('events')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
 @Controller('v1/events')
+@RequireScope('events:read')
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 

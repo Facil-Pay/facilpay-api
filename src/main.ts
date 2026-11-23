@@ -49,6 +49,8 @@ async function bootstrap() {
       '## Authentication\n' +
       '- **JWT Bearer**: Obtain a token via `POST /v1/auth/login` and pass it as `Authorization: Bearer <token>`.\n' +
       '- **API Key**: Pass your API key as the `X-API-Key` header for server-to-server requests.\n\n' +
+      '- **OAuth**: Register an app via `/v1/oauth/apps`, obtain scoped access with PKCE, and send `Authorization: Bearer <access_token>` to delegated endpoints.\n' +
+      '- **Signed API keys**: Keys with `requireSignedRequests` require `X-FacilPay-Timestamp` and `X-FacilPay-Signature` using the separate one-time signing secret.\n\n' +
       '## Idempotency\n' +
       'Payment creation supports idempotency via the `Idempotency-Key` request header. ' +
       'Keys are valid for 24 hours. Reusing a key with a different payload returns 409 Conflict.',
@@ -60,8 +62,8 @@ async function bootstrap() {
       {
         type: 'http',
         scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'JWT access token obtained from POST /v1/auth/login',
+        bearerFormat: 'JWT or opaque OAuth access token',
+        description: 'Merchant JWT from POST /v1/auth/login, or OAuth access token for explicitly scoped endpoints',
       },
       'bearer',
     )

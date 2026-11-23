@@ -1,6 +1,12 @@
 import { sanitizeBody, sanitizeHeaders } from './logging.utils';
 
 describe('logging utils', () => {
+  it('redacts OAuth and request-signing credentials', () => {
+    expect(sanitizeBody({ client_secret: 'secret', code_verifier: 'verifier', signingSecret: 'signing', redirectUrl: 'https://app?code=code' }, 0))
+      .toEqual({ client_secret: '[REDACTED]', code_verifier: '[REDACTED]', signingSecret: '[REDACTED]', redirectUrl: '[REDACTED]' });
+    expect(sanitizeHeaders({ 'x-api-key': 'key', 'x-facilpay-signature': 'signature' }))
+      .toEqual({ 'x-api-key': '[REDACTED]', 'x-facilpay-signature': '[REDACTED]' });
+  });
   it('redacts sensitive headers', () => {
     const headers = {
       authorization: 'Bearer token',

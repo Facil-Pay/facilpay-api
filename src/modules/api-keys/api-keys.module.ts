@@ -11,6 +11,7 @@ import { ApiKeysController } from './api-keys.controller';
 import { ApiKeyAuthGuard } from './api-key-auth.guard';
 import { AuditLogsModule } from '../audit-logs/audit-logs.module';
 import { UsersModule } from '../users/users.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [MerchantSecurityModule, NotificationsModule, TypeOrmModule.forFeature([ApiKey, ApiKeyUsage]), ConfigModule, AuditLogsModule, UsersModule],

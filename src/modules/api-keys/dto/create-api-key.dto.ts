@@ -10,10 +10,19 @@ import {
   MaxLength,
   IsArray,
   Matches,
+  IsBoolean,
+  ArrayNotEmpty,
+  ValidateIf,
 } from 'class-validator';
 import { ApiKeyEnvironment, ApiKeyScope } from '../api-key.entity';
+import { GRANULAR_SCOPE_PATTERN } from '../scopes';
 
 export class CreateApiKeyDto {
+  @ApiPropertyOptional({ default: false, description: 'Require signed requests; signingSecret is returned once on creation' })
+  @IsOptional()
+  @IsBoolean()
+  requireSignedRequests?: boolean;
+
   @ApiProperty({ description: 'Human-readable name for this key', example: 'My integration' })
   @IsString()
   @IsNotEmpty()
@@ -32,6 +41,8 @@ export class CreateApiKeyDto {
   })
   @IsArray()
   @ArrayNotEmpty()
+  @IsString({ each: true })
+  @Matches(GRANULAR_SCOPE_PATTERN, { each: true })
   @ValidateIf((o) => o.scopes !== undefined)
   scopes?: string[];
 

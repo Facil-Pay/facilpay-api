@@ -71,7 +71,7 @@ export class ApiKeysController {
     @CurrentUser() user: User,
     @Body() dto: CreateApiKeyDto,
     @Req() req: Request,
-  ): Promise<{ apiKey: ApiKey; plaintext: string }> {
+  ): Promise<{ apiKey: ApiKey; plaintext: string; signingSecret?: string }> {
     return this.apiKeysService.create(user.id, dto, user.id, req.ip, req.headers['user-agent']);
   }
 
@@ -124,7 +124,7 @@ export class ApiKeysController {
     @Param('id') id: string,
     @CurrentUser() user: User,
     @Body() dto: UpdateApiKeyDto,
-  ): Promise<ApiKey> {
+  ): Promise<ApiKey & { signingSecret?: string }> {
     return this.apiKeysService.update(id, user.id, dto);
   }
 
@@ -173,7 +173,7 @@ export class ApiKeysController {
     @Param('id') id: string,
     @CurrentUser() user: User,
     @Req() req: Request,
-  ): Promise<{ apiKey: ApiKey; plaintext: string }> {
+  ): Promise<{ apiKey: ApiKey; plaintext: string; signingSecret?: string }> {
     return this.apiKeysService.rotate(id, user.id, user.id, req.ip, req.headers['user-agent']);
   }
 
