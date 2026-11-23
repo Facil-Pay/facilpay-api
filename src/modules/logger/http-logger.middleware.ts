@@ -36,6 +36,8 @@ export class HttpLoggerMiddleware implements NestMiddleware {
   }
 
   use(req: Request, res: Response, next: NextFunction) {
+    // These responses can contain one-time credentials, including codes inside redirect URLs.
+    const credentialRoute = /^\/v1\/(oauth|api-keys)(\/|$)/.test(req.path ?? req.url ?? '');
     const requestId = getRequestId(req.headers) ?? randomUUID();
     // Accept upstream X-Correlation-Id or generate a fresh one
     const correlationId =
@@ -48,7 +50,7 @@ export class HttpLoggerMiddleware implements NestMiddleware {
     const startTime = process.hrtime.bigint();
     let responseBody: unknown;
 
-    if (this.logResponseBody) {
+    if (this.logResponseBody && !credentialRoute) {
       const originalJson = res.json.bind(res);
       const originalSend = res.send.bind(res);
 
@@ -88,7 +90,7 @@ export class HttpLoggerMiddleware implements NestMiddleware {
           requestMeta.headers = sanitizedHeaders;
         }
 
-        if (this.logBody) {
+        if (this.logBody && !credentialRoute) {
           const sanitizedBody = sanitizeBody(req.body, this.bodyMaxLength);
           if (sanitizedBody !== undefined) {
             requestMeta.body = sanitizedBody;
@@ -105,7 +107,7 @@ export class HttpLoggerMiddleware implements NestMiddleware {
           responseMeta.contentLength = contentLength;
         }
 
-        if (this.logResponseBody) {
+        if (this.logResponseBody && !credentialRoute) {
           const sanitizedResponseBody = sanitizeBody(
             responseBody,
             this.bodyMaxLength,

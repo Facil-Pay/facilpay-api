@@ -1,3 +1,4 @@
+import { MerchantSecurityModule } from './merchant-security.module';
 import { MerchantSettings } from './entities/merchant-settings.entity';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -17,6 +18,7 @@ import { Payment } from '../payments/payment.entity';
 @Module({
   imports: [
     ConfigModule,
+    MerchantSecurityModule,
     TypeOrmModule.forFeature([MerchantGeoRestriction, MerchantIpAllowlist, MerchantOnboarding, MerchantLimit, Payment, MerchantSettings]),
     AuditLogsModule,
   ],

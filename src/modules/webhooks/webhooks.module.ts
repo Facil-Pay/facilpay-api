@@ -10,10 +10,16 @@ import { WebhooksController } from './webhooks.controller';
 import { WebhooksProcessor } from './webhooks.processor';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersModule } from '../users/users.module';
+import { ApiKeysModule } from '../api-keys/api-keys.module';
+import { Event } from '../events/entities/event.entity';
+import { HooksController } from './hooks.controller';
+import { HooksService } from './hooks.service';
+import { AwsDestinationService } from './aws-destination.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WebhookEndpoint, WebhookDelivery, WebhookReplay]),
+    TypeOrmModule.forFeature([WebhookEndpoint, WebhookDelivery, WebhookReplay, Event]),
+    ApiKeysModule,
     HttpModule,
     BullModule.registerQueue({
       name: 'webhooks',
@@ -21,8 +27,8 @@ import { UsersModule } from '../users/users.module';
     NotificationsModule,
     UsersModule,
   ],
-  controllers: [WebhooksController],
-  providers: [WebhooksService, WebhooksProcessor],
+  controllers: [WebhooksController, HooksController],
+  providers: [WebhooksService, WebhooksProcessor, HooksService, AwsDestinationService],
   exports: [WebhooksService],
 })
 export class WebhooksModule {}

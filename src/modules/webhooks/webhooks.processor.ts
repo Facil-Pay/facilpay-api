@@ -1,5 +1,6 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
+import { AwsDestinationService } from './aws-destination.service';
 import { Job } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -28,6 +29,7 @@ export class WebhooksProcessor extends WorkerHost {
     private readonly httpService: HttpService,
     private readonly webhooksService: WebhooksService,
     appLogger: AppLogger,
+    @Optional() private readonly awsDestinationService?: AwsDestinationService,
   ) {
     super();
     this.logger = appLogger.child({ module: WebhooksProcessor.name });
@@ -44,11 +46,11 @@ export class WebhooksProcessor extends WorkerHost {
     }
 
     const endpoint = await this.endpointRepo.findOne({ where: { id: endpointId } });
-    if (!endpoint) {
+    if (!endpoint || endpoint.isActive === false || endpoint.disabledReason === 'rest_hook_gone') {
       this.logger.error({ endpointId }, 'Webhook endpoint not found');
       // Set delivery status to failed
       delivery.status = WebhookDeliveryStatus.FAILED;
-      delivery.lastError = 'Endpoint not found';
+      delivery.lastError = endpoint ? 'Endpoint is inactive' : 'Endpoint not found';
       delivery.attempts = attempt;
       delivery.lastAttemptAt = new Date();
       await this.deliveryRepo.save(delivery);
@@ -57,8 +59,8 @@ export class WebhooksProcessor extends WorkerHost {
 
     const body = JSON.stringify(payload);
     // During a rotation grace period this carries one digest per active secret.
-    const signature = signBody(body, endpoint);
-    await this.dropExpiredPreviousSecret(endpoint);
+    const signature = !endpoint.destinationType || endpoint.destinationType === 'http' ? signBody(body, endpoint) : '';
+    if (!endpoint.destinationType || endpoint.destinationType === 'http') await this.dropExpiredPreviousSecret(endpoint);
 
     delivery.attempts = attempt;
     delivery.lastAttemptAt = new Date();
@@ -66,7 +68,9 @@ export class WebhooksProcessor extends WorkerHost {
     const startedAt = performance.now();
     try {
       if (endpoint.headers) validateHeaders(endpoint.headers);
-      const response = await firstValueFrom(
+      const response = endpoint.destinationType && endpoint.destinationType !== 'http'
+        ? await this.awsDestinationService!.deliver(endpoint, payload, deliveryId)
+        : await firstValueFrom(
         this.httpService.post(endpoint.url, payload, {
           timeout: 10_000,
           maxRedirects: 0,
@@ -107,6 +111,13 @@ export class WebhooksProcessor extends WorkerHost {
       delivery.lastResponseCode = statusCode;
       delivery.lastResponseBody = truncateResponseBody(errorResponse?.data);
       delivery.lastError = errorMsg;
+
+      if (endpoint.isRestHook && statusCode === 410) {
+        await this.webhooksService.expireSubscription(endpointId);
+        delivery.status = WebhookDeliveryStatus.DEAD_LETTER;
+        await this.deliveryRepo.save(delivery);
+        return { success: false, unsubscribed: true, statusCode };
+      }
 
       // Job options specify up to 6 attempts (initial + 5 retries)
       // Record failure for endpoint auto-disable logic

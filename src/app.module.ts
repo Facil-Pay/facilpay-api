@@ -1,9 +1,15 @@
+import { MetricsModule } from './modules/metrics/metrics.module';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
+import { HttpMetricsMiddleware } from './modules/metrics/http-metrics.middleware';
+import { RequestLogsModule } from './modules/request-logs/request-logs.module';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { DatabaseModule } from './modules/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { OAuthModule } from './modules/auth/oauth/oauth.module';
 import { UsersModule } from './modules/users/users.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PaymentLinksModule } from './modules/payment-links/payment-links.module';
@@ -41,10 +47,15 @@ import { AnchorsModule } from './modules/anchors/anchors.module';
 import { ExportsModule } from './modules/exports/exports.module';
 
 import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
+import { MetricsModule } from './modules/metrics/metrics.module';
+import { HttpMetricsMiddleware } from './modules/metrics/http-metrics.middleware';
+import { MaintenanceModule } from './modules/maintenance/maintenance.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
+    RequestLogsModule,
     BullModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
@@ -63,6 +74,7 @@ import { AdminMetricsModule } from './modules/admin/admin-metrics.module';
     HealthModule,
     UsersModule,
     AuthModule,
+    OAuthModule,
     PaymentsModule,
     PaymentLinksModule,
     SettlementsModule,

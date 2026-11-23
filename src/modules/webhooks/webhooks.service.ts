@@ -24,6 +24,7 @@ import { ListWebhookDeliveriesDto } from './dto/list-webhook-deliveries.dto';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 import { WebhookReplay } from './entities/webhook-replay.entity';
 import { validateHeaders } from './header-security';
+import { validateDestination } from './aws-destination.service';
 
 export const DEFAULT_SECRET_GRACE_PERIOD_HOURS = 24;
 
@@ -97,12 +98,13 @@ export class WebhooksService {
   }
 
   async create(dto: CreateWebhookEndpointDto, merchantId: string): Promise<WebhookEndpoint> {
+    validateDestination(dto);
     if (dto.headers !== undefined) validateHeaders(dto.headers);
-    const secret = `whsec_${randomBytes(32).toString('hex')}`;
+    const secret = `whsec_${randomBytes(32).toString('base64url')}`;
     const apiVersion = dto.apiVersion && isValidApiVersion(dto.apiVersion)
       ? dto.apiVersion
       : CURRENT_API_VERSION;
-    const endpoint = this.repo.create({ ...dto, merchantId, secret, apiVersion });
+    const endpoint = this.repo.create({ ...dto, url: dto.url ?? '', destinationType: dto.destinationType ?? 'http', merchantId, secret, apiVersion });
     const saved = await this.repo.save(endpoint);
     this.logger.info({ endpointId: saved.id, merchantId }, 'Webhook endpoint registered');
     return saved;
@@ -122,6 +124,9 @@ export class WebhooksService {
   ): Promise<WebhookEndpoint> {
     const endpoint = await this.findOwned(id, merchantId);
     if (dto.headers !== undefined) validateHeaders(dto.headers);
+    if (endpoint.disabledReason === 'rest_hook_gone' && dto.isActive) throw new BadRequestException('Create a new REST hook subscription after HTTP 410');
+    if (endpoint.isRestHook && dto.destinationType && dto.destinationType !== 'http') throw new BadRequestException('REST hooks require HTTP destinations');
+    validateDestination({ ...endpoint, ...dto });
     Object.assign(endpoint, dto);
     const updated = await this.repo.save(endpoint);
     this.logger.info({ endpointId: id, merchantId }, 'Webhook endpoint updated');
@@ -132,6 +137,29 @@ export class WebhooksService {
     const endpoint = await this.findOwned(id, merchantId);
     await this.repo.remove(endpoint);
     this.logger.info({ endpointId: id, merchantId }, 'Webhook endpoint deleted');
+  }
+
+  async subscribe(dto: CreateWebhookEndpointDto, merchantId: string): Promise<WebhookEndpoint> {
+    // Persist the subscription flag with the first insert, so a delivery cannot race it.
+    validateDestination({ ...dto, destinationType: 'http' });
+    return this.repo.save(this.repo.create({
+      url: dto.url!, events: dto.events, apiVersion: dto.apiVersion ?? CURRENT_API_VERSION,
+      merchantId, secret: `whsec_${randomBytes(32).toString('base64url')}`,
+      destinationType: 'http', isRestHook: true,
+    }));
+  }
+
+  async unsubscribe(id: string, merchantId: string): Promise<void> {
+    const endpoint = await this.findOwned(id, merchantId);
+    if (!endpoint.isRestHook) throw new NotFoundException('REST hook subscription not found');
+    await this.repo.remove(endpoint);
+  }
+
+  async expireSubscription(endpointId: string): Promise<void> {
+    // Keep the endpoint as a tombstone so delivery logs survive unsubscribe.
+    await this.repo.update({ id: endpointId, isRestHook: true }, {
+      isRestHook: false, isActive: false, disabledReason: 'rest_hook_gone',
+    });
   }
 
   async rotateSecret(
@@ -151,7 +179,7 @@ export class WebhooksService {
       endpoint.previousSecret = null;
       endpoint.previousSecretExpiresAt = null;
     }
-    endpoint.secret = `whsec_${randomBytes(32).toString('hex')}`;
+    endpoint.secret = `whsec_${randomBytes(32).toString('base64url')}`;
     const updated = await this.repo.save(endpoint);
     this.logger.info(
       { endpointId: id, merchantId, graceHours },
@@ -279,6 +307,7 @@ export class WebhooksService {
 
   async reenableEndpoint(id: string, merchantId: string): Promise<WebhookEndpoint> {
     const endpoint = await this.findOwned(id, merchantId);
+    if (endpoint.disabledReason === 'rest_hook_gone') throw new BadRequestException('Create a new REST hook subscription after HTTP 410');
 
     if (endpoint.isActive && !endpoint.disabledReason) {
       return endpoint;

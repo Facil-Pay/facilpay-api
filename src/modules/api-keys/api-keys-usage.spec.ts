@@ -3,6 +3,8 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { NotFoundException } from '@nestjs/common';
+import { AuditLogsService } from '../audit-logs/audit-logs.service';
+import { EmailNotificationService } from '../notifications/email-notification.service';
 import { ApiKeysService } from './api-keys.service';
 import { ApiKey } from './api-key.entity';
 import { ApiKeyUsage } from './api-key-usage.entity';
@@ -24,6 +26,8 @@ describe('ApiKeysService - Usage Tracking', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ApiKeysService,
+        { provide: AuditLogsService, useValue: { record: jest.fn() } },
+        { provide: EmailNotificationService, useValue: { sendApiKeyExpiryWarning: jest.fn() } },
         {
           provide: getRepositoryToken(ApiKey),
           useValue: {

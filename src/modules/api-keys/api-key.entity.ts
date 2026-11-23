@@ -28,6 +28,13 @@ export type GranularScope = string;
 
 @Entity('api_keys')
 export class ApiKey {
+  @Column({ default: false })
+  @ApiProperty({ default: false, description: 'Require HMAC signatures and timestamps on API requests' })
+  requireSignedRequests: boolean;
+
+  @Column({ type: 'text', nullable: true, select: false })
+  signingSecretEncrypted: string | null;
+
   @PrimaryGeneratedColumn('uuid')
   @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
   id: string;
@@ -73,6 +80,12 @@ export class ApiKey {
   @Column({ nullable: true, type: 'timestamp' })
   @ApiPropertyOptional({ example: '2026-06-28T10:00:00.000Z' })
   lastUsedAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  inactivityWarningAt: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  inactivityRevokeAt: Date | null;
 
   @Column({ default: true })
   @ApiProperty({ example: true })

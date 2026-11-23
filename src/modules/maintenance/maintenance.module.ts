@@ -5,7 +5,7 @@ import { MaintenanceScheduler } from './maintenance.scheduler';
 import { LoggerModule } from '../logger/logger.module';
 
 @Module({
-  imports: [ScheduleModule.forRoot(), LoggerModule],
+  imports: [ScheduleModule, LoggerModule],
   providers: [MaintenanceService, MaintenanceScheduler],
   exports: [MaintenanceService],
 })

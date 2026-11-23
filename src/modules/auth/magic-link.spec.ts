@@ -19,7 +19,7 @@ describe('Magic-link authentication', () => {
     query = {};
     for (const method of ['update', 'set', 'where', 'andWhere']) query[method] = jest.fn().mockReturnValue(query);
     query.execute = jest.fn().mockResolvedValue({ affected: 1 });
-    repo = { save: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(query) };
+    repo = { findBy: jest.fn().mockResolvedValue([]), existsBy: jest.fn().mockResolvedValue(false), save: jest.fn(), createQueryBuilder: jest.fn().mockReturnValue(query) };
     manager = { query: jest.fn().mockResolvedValue([{ count: 1 }]) };
     mail = { sendMagicLinkEmail: jest.fn() };
     complete = jest.fn().mockResolvedValue({ access_token: 'access', refresh_token: 'refresh' });
@@ -53,6 +53,12 @@ describe('Magic-link authentication', () => {
   it('keeps the generic response when email delivery fails', async () => {
     mail.sendMagicLinkEmail.mockRejectedValue(new Error('SMTP down'));
     await expect(service.requestMagicLink(user.email)).resolves.toHaveProperty('message');
+  });
+  it('does not bypass mandatory SAML SSO or consume the link', async () => {
+    repo.existsBy.mockResolvedValue(true);
+    await expect(service.verifyMagicLink('signed-token')).rejects.toThrow('requires SAML SSO');
+    expect(query.execute).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
   });
   it('redeems once and rejects replay before issuing new tokens', async () => {
     query.execute.mockResolvedValueOnce({ affected: 1 }).mockResolvedValue({ affected: 0 });

@@ -32,6 +32,22 @@ export class MailService {
     });
   }
 
+  async sendTeamTwoFactorRequired(to: string): Promise<void> {
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('SMTP_FROM', 'noreply@facilpay.com'), to,
+      subject: 'Your team now requires two-factor authentication',
+      text: 'Your merchant team requires two-factor authentication. Set up an authenticator or register a passkey to regain access.',
+    });
+  }
+
+  async sendApiKeyInactivityWarning(to: string, prefix: string, revokeAt: Date): Promise<void> {
+    await this.transporter.sendMail({
+      from: this.configService.get<string>('SMTP_FROM', 'noreply@facilpay.com'), to,
+      subject: 'An inactive FacilPay API key will be revoked',
+      text: 'Your inactive API key ' + prefix + ' will be revoked on ' + revokeAt.toISOString() + '. Use the key before that date to keep it active, or revoke it now.',
+    });
+  }
+
   async sendMagicLinkEmail(to: string, token: string): Promise<void> {
     const appUrl = this.configService.get<string>('APP_URL', 'http://localhost:3000');
     const url = appUrl + '/auth/magic-link?token=' + encodeURIComponent(token);

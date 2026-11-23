@@ -63,6 +63,11 @@ export class InvoicesController {
     return this.invoicesService.void(req.user.id, id);
   }
 
+  @Post(':id/mark-uncollectible')
+  markUncollectible(@Param('id') id: string, @Req() req: any) {
+    return this.invoicesService.markUncollectible(req.user.id, id);
+  }
+
   @Post(':id/duplicate')
   duplicate(@Param('id') id: string, @Req() req: any) {
     return this.invoicesService.duplicate(req.user.id, id);

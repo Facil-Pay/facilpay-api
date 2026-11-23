@@ -9,6 +9,7 @@ import { Repository, LessThan } from 'typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ConfigService } from '@nestjs/config';
 import { createHash, randomBytes } from 'crypto';
+import { encryptSigningSecret } from './request-signing';
 import { ApiKey, ApiKeyEnvironment, ApiKeyScope } from './api-key.entity';
 import { ApiKeyUsage } from './api-key-usage.entity';
 import { CreateApiKeyDto } from './dto/create-api-key.dto';
@@ -40,16 +41,19 @@ export class ApiKeysService {
     actorId?: string,
     ipAddress?: string,
     userAgent?: string,
-  ): Promise<{ apiKey: ApiKey; plaintext: string }> {
+  ): Promise<{ apiKey: ApiKey; plaintext: string; signingSecret?: string }> {
     const environment = dto.environment ?? ApiKeyEnvironment.LIVE;
     const rawToken = randomBytes(32).toString('hex');
     const prefix = environment === ApiKeyEnvironment.LIVE ? 'fp_live_' : 'fp_test_';
     const plaintext = `${prefix}${rawToken}`;
     const keyHash = createHash('sha256').update(plaintext).digest('hex');
     const keyPrefix = plaintext.slice(0, 12);
+    const signingSecret = dto.requireSignedRequests ? randomBytes(32).toString('hex') : undefined;
 
     const apiKey = this.apiKeyRepository.create({
       name: dto.name,
+      requireSignedRequests: dto.requireSignedRequests ?? false,
+      signingSecretEncrypted: signingSecret ? encryptSigningSecret(signingSecret) : null,
       keyHash,
       keyPrefix,
       userId,
@@ -83,7 +87,8 @@ export class ApiKeysService {
       },
     });
 
-    return { apiKey: saved, plaintext };
+    delete (saved as Partial<ApiKey>).signingSecretEncrypted;
+    return { apiKey: saved, plaintext, ...(signingSecret ? { signingSecret } : {}) };
   }
 
   async findAllForUser(userId: string): Promise<ApiKey[]> {
@@ -125,24 +130,33 @@ export class ApiKeysService {
     });
   }
 
-  async update(id: string, userId: string, dto: UpdateApiKeyDto): Promise<ApiKey> {
+  async update(id: string, userId: string, dto: UpdateApiKeyDto): Promise<ApiKey & { signingSecret?: string }> {
     const key = await this.apiKeyRepository.findOne({ where: { id, userId, isActive: true } });
     if (!key) {
       throw new NotFoundException(`API key with ID ${id} not found`);
     }
+    const signingSecret = dto.requireSignedRequests === true && !key.requireSignedRequests
+      ? randomBytes(32).toString('hex') : undefined;
+    if (signingSecret) key.signingSecretEncrypted = encryptSigningSecret(signingSecret);
+    if (dto.requireSignedRequests !== undefined) key.requireSignedRequests = dto.requireSignedRequests;
     if (dto.name !== undefined) key.name = dto.name;
     if (dto.scope !== undefined) key.scope = dto.scope;
     if (dto.rateLimitLimit !== undefined) key.rateLimitLimit = dto.rateLimitLimit;
     if (dto.rateLimitTtl !== undefined) key.rateLimitTtl = dto.rateLimitTtl;
     if (dto.allowedIps !== undefined) key.allowedIps = dto.allowedIps;
-    return this.apiKeyRepository.save(key);
+    const saved = await this.apiKeyRepository.save(key);
+    delete (saved as Partial<ApiKey>).signingSecretEncrypted;
+    return signingSecret ? { ...saved, signingSecret } : saved;
   }
 
-  async rotate(id: string, userId: string, actorId?: string, ipAddress?: string, userAgent?: string): Promise<{ apiKey: ApiKey; plaintext: string }> {
+  async rotate(id: string, userId: string, actorId?: string, ipAddress?: string, userAgent?: string): Promise<{ apiKey: ApiKey; plaintext: string; signingSecret?: string }> {
     const key = await this.apiKeyRepository.findOne({ where: { id, userId, isActive: true } });
     if (!key) {
       throw new NotFoundException(`API key with ID ${id} not found`);
     }
+    // Validate encryption configuration before invalidating the working key.
+    const signingSecret = key.requireSignedRequests ? randomBytes(32).toString('hex') : undefined;
+    const signingSecretEncrypted = signingSecret ? encryptSigningSecret(signingSecret) : null;
     key.isActive = false;
     await this.apiKeyRepository.save(key);
 
@@ -153,6 +167,8 @@ export class ApiKeysService {
 
     const newKey = this.apiKeyRepository.create({
       name: key.name,
+      requireSignedRequests: key.requireSignedRequests,
+      signingSecretEncrypted,
       keyHash: newHash,
       keyPrefix: plaintext.slice(0, 12),
       userId,
@@ -186,7 +202,8 @@ export class ApiKeysService {
       },
     });
 
-    return { apiKey: saved, plaintext };
+    delete (saved as Partial<ApiKey>).signingSecretEncrypted;
+    return { apiKey: saved, plaintext, ...(signingSecret ? { signingSecret } : {}) };
   }
 
   async validateKey(plaintext: string, sourceIp?: string): Promise<ApiKey> {
@@ -195,6 +212,13 @@ export class ApiKeysService {
 
     if (!key) {
       throw new UnauthorizedException('Invalid API key');
+    }
+    if (key.requireSignedRequests) {
+      const signing = await this.apiKeyRepository.createQueryBuilder('key')
+        .addSelect('key.signingSecretEncrypted')
+        .where('key.id = :id AND key.isActive = true', { id: key.id }).getOne();
+      if (!signing) throw new UnauthorizedException('Invalid API key');
+      key.signingSecretEncrypted = signing.signingSecretEncrypted;
     }
 
     if (key.expiresAt && key.expiresAt < new Date()) {
@@ -211,7 +235,10 @@ export class ApiKeysService {
     }
 
     key.lastUsedAt = new Date();
-    await this.apiKeyRepository.save(key);
+    const touched = await this.apiKeyRepository.update({ id: key.id, isActive: true }, {
+      lastUsedAt: key.lastUsedAt, inactivityWarningAt: null, inactivityRevokeAt: null,
+    });
+    if (!touched.affected) throw new UnauthorizedException('Invalid API key');
 
     return key;
   }

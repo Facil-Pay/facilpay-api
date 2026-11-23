@@ -45,6 +45,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../users/user.entity';
 import { PaginatedResult } from '../../common/interfaces/paginated-result.interface';
 import { CustomerPortalService } from './customer-portal.service';
+import { RequireScope } from '../api-keys/decorators/require-scope.decorator';
 
 @ApiTags('customers')
 @ApiBearerAuth('bearer')
@@ -57,6 +58,7 @@ export class CustomersController {
   ) {}
 
   @Post()
+  @RequireScope('customers:write')
   @ApiOperation({
     summary: 'Create a customer',
     description:
@@ -77,6 +79,7 @@ export class CustomersController {
   }
 
   @Get()
+  @RequireScope('customers:read')
   @ApiOperation({
     summary: 'List customers',
     description:
@@ -115,6 +118,7 @@ export class CustomersController {
   }
 
   @Get(':id')
+  @RequireScope('customers:read')
   @ApiOperation({ summary: 'Get a customer by ID' })
   @ApiParam({ name: 'id', description: 'Customer UUID' })
   @ApiOkResponse({ description: 'Customer found.', type: Customer })
@@ -159,6 +163,7 @@ export class CustomersController {
   }
 
   @Patch(':id')
+  @RequireScope('customers:write')
   @ApiOperation({
     summary: 'Update a customer',
     description:
@@ -184,6 +189,7 @@ export class CustomersController {
   }
 
   @Post(':id/merge')
+  @RequireScope('customers:write')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Merge a duplicate customer into this customer',
@@ -215,6 +221,7 @@ export class CustomersController {
   }
 
   @Delete(':id')
+  @RequireScope('customers:write')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete a customer',

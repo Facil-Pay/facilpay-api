@@ -22,7 +22,7 @@ export class CorsConfigService {
       allowedOrigins,
       credentials,
       allowedMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-Id'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Correlation-Id', 'X-API-Key', 'X-FacilPay-Timestamp', 'X-FacilPay-Signature'],
     };
 
     return plainToInstance(CorsConfig, configData);

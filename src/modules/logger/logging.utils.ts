@@ -1,6 +1,6 @@
 import { Request } from 'express';
 
-const HEADER_REDACT_KEYS = new Set(['authorization', 'cookie', 'set-cookie']);
+const HEADER_REDACT_KEYS = new Set(['authorization', 'cookie', 'set-cookie', 'x-api-key', 'x-facilpay-signature']);
 const BODY_REDACT_KEYS = new Set([
   'password',
   'pass',
@@ -8,6 +8,12 @@ const BODY_REDACT_KEYS = new Set([
   'token',
   'access_token',
   'refresh_token',
+  'client_secret',
+  'code_verifier',
+  'signingsecret',
+  'signingsecretencrypted',
+  'redirecturl',
+  'plaintext',
   'secret',
   'apikey',
   'api_key',

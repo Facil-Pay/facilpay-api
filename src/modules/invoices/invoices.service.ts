@@ -167,6 +167,19 @@ export class InvoicesService {
     return saved;
   }
 
+  async markUncollectible(merchantId: string, id: string): Promise<Invoice> {
+    const invoice = await this.findOne(merchantId, id);
+    if (![InvoiceStatus.OPEN, InvoiceStatus.OVERDUE].includes(invoice.status)) {
+      throw new ConflictException(
+        'Only open or overdue invoices can be marked as uncollectible',
+      );
+    }
+    invoice.status = InvoiceStatus.UNCOLLECTIBLE;
+    const saved = await this.invoiceRepository.save(invoice);
+    await this.dispatchInvoiceEvent('invoice.marked_uncollectible', saved);
+    return saved;
+  }
+
   async duplicate(merchantId: string, id: string): Promise<Invoice> {
     const source = await this.findOne(merchantId, id);
     const runner = this.dataSource.createQueryRunner();
@@ -234,7 +247,7 @@ export class InvoicesService {
 
   async pay(token: string, payerEmail?: string): Promise<unknown> {
     const invoice = await this.findPublic(token);
-    if (![InvoiceStatus.OPEN, InvoiceStatus.OVERDUE].includes(invoice.status)) {
+    if (![InvoiceStatus.OPEN, InvoiceStatus.OVERDUE, InvoiceStatus.UNCOLLECTIBLE].includes(invoice.status)) {
       throw new ConflictException('Invoice is not payable');
     }
     return this.paymentsService.createForInvoice(invoice, payerEmail);
@@ -246,7 +259,7 @@ export class InvoicesService {
       relations: { lineItems: true },
     });
     if (!invoice) return;
-    if (![InvoiceStatus.OPEN, InvoiceStatus.OVERDUE].includes(invoice.status)) return;
+    if (![InvoiceStatus.OPEN, InvoiceStatus.OVERDUE, InvoiceStatus.UNCOLLECTIBLE].includes(invoice.status)) return;
 
     const result = await this.invoiceRepository
       .createQueryBuilder()

@@ -211,6 +211,9 @@ Environment variables:
 
 ## 📚 Further Documentation
 
+- **[Documentation Index](docs/README.md)** — Complete guide to all features
+- **[API Conventions](docs/API_CONVENTIONS.md)** — Pagination, filtering, sorting, and HTTP headers
+- **[Testing](docs/TESTING.md)** — How to run and write unit and e2e tests
 - [Contributing](CONTRIBUTING.md) — setup, conventions, PR checklist
 - [Sessions](docs/SESSIONS.md) — session listing and revocation
 - [Refunds](docs/REFUNDS.md) — refund system and maker-checker approval flow

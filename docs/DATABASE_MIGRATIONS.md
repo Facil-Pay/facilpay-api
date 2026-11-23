@@ -110,6 +110,26 @@ export class BackfillExample1754500000000 implements MigrationInterface {
 
 ## Workflow summary
 
+The integrations changes add these migrations in order:
+
+| Migration | Forward change | Rollback |
+| --- | --- | --- |
+| `1793300000000-AddApiKeyRequestSigning` | Optional signing flag and encrypted secret on API keys | Drops both columns |
+| `1793400000000-AddEventDestinationsAndRestHooks` | HTTP/AWS destination metadata and REST hook flag | Drops the check constraint and new columns |
+| `1793500000000-CreateOAuthApps` | OAuth clients, merchant grants and hashed credentials | Drops credentials, grants, then clients |
+
+Each implements `up()` and `down()`. Revert one migration at a time in reverse
+order with the existing `npm run migrate:revert` script. Rollback removes feature
+data: OAuth connections/tokens are deleted, signed-request configuration is lost,
+and AWS endpoints lose their ARN/role metadata. Disable/remove AWS destinations
+and REST hook subscriptions before rolling that feature back. Run forward and
+rollback checks against a disposable PostgreSQL database before deployment.
+These commands were not executed as part of this file-only implementation.
+
+The new AWS SDK dependencies are declared in `package.json`. Dependency
+installation and regeneration of `package-lock.json` remain required; no package
+manager was run as part of these edits.
+
 1. Update entities in `src/`.
 2. Generate or create a migration with a unique timestamp and descriptive name.
 3. Review the generated SQL; adjust for safety (idempotency, batching, `down()`).

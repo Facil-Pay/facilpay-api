@@ -1,3 +1,4 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -45,21 +46,14 @@ export class MerchantSettings {
   @Column({ type: 'jsonb', nullable: true })
   refundApprovalThresholds: Record<string, number> | null = null;
 
-  /** Invoice number prefix, e.g. "INV" or "2024-INV" */
-  @Column({ type: 'varchar', length: 20, nullable: true })
-  invoicePrefix: string | null = null;
+  /** Null disables inactivity revocation. */
+  @Column({ type: 'int', nullable: true })
+  @ApiPropertyOptional({ nullable: true, default: null, minimum: 8, maximum: 3650 })
+  apiKeyInactivityDays: number | null = null;
 
-  /** Zero-padding for invoice numbers (e.g. 6 → "000001") */
-  @Column({ type: 'int', default: 6 })
-  invoiceNumberPadding: number = 6;
-
-  /** When to reset the invoice sequence */
-  @Column({
-    type: 'varchar',
-    length: 10,
-    default: 'never',
-  })
-  resetSequence: 'never' | 'yearly' = 'never';
+  @Column({ default: false })
+  @ApiProperty({ default: false, description: 'Require TOTP or passkey enrollment for the entire team' })
+  require2fa: boolean = false;
 
   @CreateDateColumn()
   createdAt: Date;
