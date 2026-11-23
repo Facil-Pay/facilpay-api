@@ -29,9 +29,13 @@ import {
 } from '@nestjs/swagger';
 import { CustomersService } from './customers.service';
 import { Customer } from './customer.entity';
+import { CustomerNote } from './entities/customer-note.entity';
+import { CustomerWallet } from './entities/customer-wallet.entity';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { GetCustomersDto } from './dto/get-customers.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
+import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
+import { GetCustomerTimelineDto, CustomerTimelineResponse } from './dto/customer-timeline.dto';
 import {
   MergeCustomerDto,
   MergeCustomerResult,
@@ -236,5 +240,111 @@ export class CustomersController {
     @CurrentUser() user: User,
   ): Promise<void> {
     await this.customersService.remove(id, user.id);
+  }
+
+  @Post(':id/notes')
+  @ApiOperation({
+    summary: 'Add an internal note to a customer',
+    description:
+      'Creates a merchant-internal note that is never exposed in the customer portal.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer UUID' })
+  @ApiBody({ type: CreateCustomerNoteDto })
+  @ApiCreatedResponse({ description: 'Note created.', type: CustomerNote })
+  @ApiNotFoundResponse({ description: 'Customer not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  createNote(
+    @Param('id') id: string,
+    @Body() dto: CreateCustomerNoteDto,
+    @CurrentUser() user: User,
+  ): Promise<CustomerNote> {
+    return this.customersService.createNote(id, user.id, dto, {
+      id: user.id,
+      name: user.name ?? undefined,
+    });
+  }
+
+  @Get(':id/notes')
+  @ApiOperation({
+    summary: 'Get all notes for a customer',
+    description: 'Returns notes ordered newest first.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer UUID' })
+  @ApiOkResponse({ description: 'Notes retrieved.', type: [CustomerNote] })
+  @ApiNotFoundResponse({ description: 'Customer not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  getNotes(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<CustomerNote[]> {
+    return this.customersService.getNotes(id, user.id);
+  }
+
+  @Get(':id/wallets')
+  @ApiOperation({
+    summary: 'Get customer wallet addresses',
+    description: 'Returns all stored Stellar wallet addresses for this customer.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer UUID' })
+  @ApiOkResponse({ description: 'Wallets retrieved.', type: [CustomerWallet] })
+  @ApiNotFoundResponse({ description: 'Customer not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  getWallets(
+    @Param('id') id: string,
+    @CurrentUser() user: User,
+  ): Promise<CustomerWallet[]> {
+    return this.customersService.getWallets(id, user.id);
+  }
+
+  @Delete(':id/wallets/:walletId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary: 'Delete a wallet address',
+    description: 'Removes a stored wallet address from the customer.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer UUID' })
+  @ApiParam({ name: 'walletId', description: 'Wallet UUID' })
+  @ApiNoContentResponse({ description: 'Wallet deleted.' })
+  @ApiNotFoundResponse({ description: 'Customer or wallet not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  async deleteWallet(
+    @Param('id') id: string,
+    @Param('walletId') walletId: string,
+    @CurrentUser() user: User,
+  ): Promise<void> {
+    await this.customersService.deleteWallet(walletId, id, user.id);
+  }
+
+  @Get(':id/timeline')
+  @ApiOperation({
+    summary: 'Get customer activity timeline',
+    description:
+      'Returns a merged timeline of payments, invoices, refunds, disputes and notes, ordered newest first with cursor-based pagination.',
+  })
+  @ApiParam({ name: 'id', description: 'Customer UUID' })
+  @ApiOkResponse({
+    description: 'Timeline retrieved.',
+    schema: {
+      example: {
+        data: [
+          {
+            id: 'uuid',
+            type: 'payment',
+            timestamp: '2024-01-01T00:00:00.000Z',
+            data: { amount: 100, currency: 'USD', status: 'COMPLETED' },
+          },
+        ],
+        nextCursor: '2024-01-01T00:00:00.000Z_uuid',
+      },
+    },
+  })
+  @ApiNotFoundResponse({ description: 'Customer not found.' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid JWT.' })
+  getTimeline(
+    @Param('id') id: string,
+    @Query() dto: GetCustomerTimelineDto,
+    @CurrentUser() user: User,
+  ): Promise<CustomerTimelineResponse> {
+    return this.customersService.getTimeline(id, user.id, dto);
   }
 }

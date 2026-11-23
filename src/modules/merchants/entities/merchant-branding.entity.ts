@@ -31,6 +31,15 @@ export class MerchantBranding {
   @Column({ nullable: true })
   supportUrl: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  receiptFooter: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  invoiceFooter: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  taxId: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 
