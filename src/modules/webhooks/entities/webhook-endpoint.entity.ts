@@ -9,6 +9,11 @@ import {
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { CURRENT_API_VERSION } from '../payload-serializers/registry';
 import { encryptedHeadersTransformer } from '../header-security';
+import {
+  DEFAULT_SIGNATURE_SCHEME,
+  WEBHOOK_SIGNATURE_SCHEMES,
+  WebhookSignatureScheme,
+} from '../webhook-signing';
 
 export const WEBHOOK_EVENT_TYPES = [
   'payment.created',
@@ -98,6 +103,15 @@ export class WebhookEndpoint {
     example: 'whsec_abc123...',
   })
   secret: string;
+
+  @Column({ type: 'varchar', length: 20, default: DEFAULT_SIGNATURE_SCHEME })
+  @ApiProperty({
+    enum: WEBHOOK_SIGNATURE_SCHEMES,
+    default: DEFAULT_SIGNATURE_SCHEME,
+    description:
+      '`hmac-sha256` signs with `secret`; `ed25519` signs with the platform key published at GET /v1/webhooks/public-keys',
+  })
+  signatureScheme: WebhookSignatureScheme = DEFAULT_SIGNATURE_SCHEME;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   previousSecret: string | null;

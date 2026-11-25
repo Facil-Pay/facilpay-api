@@ -25,6 +25,7 @@ import { PaginatedResult } from '../../common/interfaces/paginated-result.interf
 import { WebhookReplay } from './entities/webhook-replay.entity';
 import { validateHeaders } from './header-security';
 import { validateDestination } from './aws-destination.service';
+import { DEFAULT_SIGNATURE_SCHEME } from './webhook-signing';
 
 export const DEFAULT_SECRET_GRACE_PERIOD_HOURS = 24;
 
@@ -104,7 +105,7 @@ export class WebhooksService {
     const apiVersion = dto.apiVersion && isValidApiVersion(dto.apiVersion)
       ? dto.apiVersion
       : CURRENT_API_VERSION;
-    const endpoint = this.repo.create({ ...dto, url: dto.url ?? '', destinationType: dto.destinationType ?? 'http', merchantId, secret, apiVersion });
+    const endpoint = this.repo.create({ ...dto, url: dto.url ?? '', destinationType: dto.destinationType ?? 'http', signatureScheme: dto.signatureScheme ?? DEFAULT_SIGNATURE_SCHEME, merchantId, secret, apiVersion });
     const saved = await this.repo.save(endpoint);
     this.logger.info({ endpointId: saved.id, merchantId }, 'Webhook endpoint registered');
     return saved;
