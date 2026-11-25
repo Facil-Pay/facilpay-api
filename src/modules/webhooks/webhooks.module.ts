@@ -5,6 +5,9 @@ import { BullModule } from '@nestjs/bullmq';
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
 import { WebhookReplay } from './entities/webhook-replay.entity';
+import { WebhookSigningKey } from './entities/webhook-signing-key.entity';
+import { WebhookSigningKeysService } from './webhook-signing-keys.service';
+import { WebhookPublicKeysController } from './webhook-public-keys.controller';
 import { WebhooksService } from './webhooks.service';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksProcessor } from './webhooks.processor';
@@ -18,7 +21,7 @@ import { AwsDestinationService } from './aws-destination.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([WebhookEndpoint, WebhookDelivery, WebhookReplay, Event]),
+    TypeOrmModule.forFeature([WebhookEndpoint, WebhookDelivery, WebhookReplay, WebhookSigningKey, Event]),
     ApiKeysModule,
     HttpModule,
     BullModule.registerQueue({
@@ -27,8 +30,9 @@ import { AwsDestinationService } from './aws-destination.service';
     NotificationsModule,
     UsersModule,
   ],
-  controllers: [WebhooksController, HooksController],
-  providers: [WebhooksService, WebhooksProcessor, HooksService, AwsDestinationService],
-  exports: [WebhooksService],
+  // Public keys first so `/v1/webhooks/public-keys` is matched before parameterised routes.
+  controllers: [WebhookPublicKeysController, WebhooksController, HooksController],
+  providers: [WebhooksService, WebhooksProcessor, HooksService, AwsDestinationService, WebhookSigningKeysService],
+  exports: [WebhooksService, WebhookSigningKeysService],
 })
 export class WebhooksModule {}

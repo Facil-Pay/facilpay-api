@@ -13,7 +13,8 @@ import { WebhookDelivery, WebhookDeliveryStatus } from './entities/webhook-deliv
 import { WebhookEndpoint } from './entities/webhook-endpoint.entity';
 import { validateHeaders } from './header-security';
 import { truncateResponseBody } from './delivery-response';
-import { isPreviousSecretActive, signBody } from './webhook-signing';
+import { isPreviousSecretActive, signBody, signBodyEd25519 } from './webhook-signing';
+import { WebhookSigningKeysService } from './webhook-signing-keys.service';
 import { performance } from 'perf_hooks';
 
 @Processor('webhooks', { limiter: { max: 10, duration: 1000 } })
@@ -30,6 +31,7 @@ export class WebhooksProcessor extends WorkerHost {
     private readonly webhooksService: WebhooksService,
     appLogger: AppLogger,
     @Optional() private readonly awsDestinationService?: AwsDestinationService,
+    @Optional() private readonly signingKeysService?: WebhookSigningKeysService,
   ) {
     super();
     this.logger = appLogger.child({ module: WebhooksProcessor.name });
@@ -58,15 +60,21 @@ export class WebhooksProcessor extends WorkerHost {
     }
 
     const body = JSON.stringify(payload);
-    // During a rotation grace period this carries one digest per active secret.
-    const signature = !endpoint.destinationType || endpoint.destinationType === 'http' ? signBody(body, endpoint) : '';
-    if (!endpoint.destinationType || endpoint.destinationType === 'http') await this.dropExpiredPreviousSecret(endpoint);
+    const isHttp = !endpoint.destinationType || endpoint.destinationType === 'http';
+    const usesEd25519 = isHttp && endpoint.signatureScheme === 'ed25519';
+    // HMAC: during a rotation grace period this carries one digest per active secret.
+    let signature = isHttp && !usesEd25519 ? signBody(body, endpoint) : '';
+    if (isHttp && !usesEd25519) await this.dropExpiredPreviousSecret(endpoint);
 
     delivery.attempts = attempt;
     delivery.lastAttemptAt = new Date();
 
     const startedAt = performance.now();
     try {
+      if (usesEd25519) {
+        if (!this.signingKeysService) throw new Error('Ed25519 webhook signing is not configured');
+        signature = signBodyEd25519(body, await this.signingKeysService.getSigningKey());
+      }
       if (endpoint.headers) validateHeaders(endpoint.headers);
       const response = endpoint.destinationType && endpoint.destinationType !== 'http'
         ? await this.awsDestinationService!.deliver(endpoint, payload, deliveryId)

@@ -2,6 +2,7 @@ import { IsUrl, IsArray, ArrayNotEmpty, IsEnum, ArrayUnique, IsOptional, IsStrin
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WEBHOOK_EVENT_TYPES, WebhookEventType } from '../entities/webhook-endpoint.entity';
 import { SUPPORTED_API_VERSIONS, CURRENT_API_VERSION } from '../payload-serializers/registry';
+import { WEBHOOK_SIGNATURE_SCHEMES, WebhookSignatureScheme } from '../webhook-signing';
 import { IsObject } from 'class-validator';
 import { IsIn, ValidateIf, MaxLength } from 'class-validator';
 
@@ -62,4 +63,17 @@ export class CreateWebhookEndpointDto {
     example: CURRENT_API_VERSION,
   })
   apiVersion?: string;
+
+  @IsOptional()
+  @IsIn(WEBHOOK_SIGNATURE_SCHEMES, {
+    message: `signatureScheme must be one of: ${WEBHOOK_SIGNATURE_SCHEMES.join(', ')}`,
+  })
+  @ApiPropertyOptional({
+    description:
+      'How deliveries are signed. `hmac-sha256` (default) uses the endpoint secret; `ed25519` uses the platform key published at GET /v1/webhooks/public-keys.',
+    enum: WEBHOOK_SIGNATURE_SCHEMES,
+    default: 'hmac-sha256',
+    example: 'ed25519',
+  })
+  signatureScheme?: WebhookSignatureScheme;
 }
